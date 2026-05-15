@@ -162,6 +162,32 @@ export function AanvullingTab({
 
   return (
     <div className="space-y-4">
+      {lianderInfo && lianderInfo.active_count === 0 && (
+        <Card className="border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4" />
+            <div>
+              Er is nog geen Liander Assortimentslijst geïmporteerd. Importeer eerst
+              een actuele lijst voordat je Aanvulling kunt opbouwen.
+            </div>
+          </div>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <MiniStat
+          label="Actieve Liander-lijst (laatste import)"
+          value={
+            lianderInfo?.last_import_date
+              ? new Date(lianderInfo.last_import_date).toLocaleDateString("nl-NL")
+              : "—"
+          }
+        />
+        <MiniStat label="Actieve Liander-artikelen" value={lianderInfo?.active_count ?? 0} />
+        <MiniStat label="Gematchte bestelregels" value={rows.length} />
+        <MiniStat label="Niet-gematchte materiaalregels" value={unmatched.length} />
+      </div>
+
       <div className="flex items-center justify-between">
         <p className="text-sm text-slate-500">
           Bestelvoorbereiding richting Liander. Alleen artikelen die voorkomen in
