@@ -555,6 +555,63 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      _mark_case_material_dirty: {
+        Args: { p_case_id: string }
+        Returns: undefined
+      }
+      bulk_add_case_material_lines: {
+        Args: { p_case_id: string; p_lines: Json }
+        Returns: Json
+      }
+      get_case_material_lines_with_status: {
+        Args: { p_case_id: string }
+        Returns: {
+          article_id: string
+          article_number: string
+          case_id: string
+          category_code: string
+          category_id: string
+          charge_or_haspel_number: string
+          created_at: string
+          description: string
+          id: string
+          is_auto_generated: boolean
+          is_manual: boolean
+          liander_description: string
+          liander_status: string
+          liander_unit: string
+          note: string
+          quantity: number
+          return_quantity: number
+          sort_order: number
+          source_rule: string
+          total_quantity: number
+          unit: string
+          updated_at: string
+          used_quantity: number
+        }[]
+      }
+      lookup_material_articles: {
+        Args: { p_article_numbers: string[] }
+        Returns: {
+          article_number: string
+          category_code: string
+          category_id: string
+          description: string
+          found: boolean
+          liander_status: string
+          source: string
+          unit: string
+        }[]
+      }
+      move_case_material_line_to_category: {
+        Args: { p_case_id: string; p_category_id: string; p_line_id: string }
+        Returns: Json
+      }
+      normalize_case_material_sort_order: {
+        Args: { p_case_id: string }
+        Returns: Json
+      }
       process_liander_assortment_import: {
         Args: {
           p_file_name: string
@@ -569,6 +626,10 @@ export type Database = {
         Returns: Json
       }
       rebuild_case_order_lines: { Args: { p_case_id: string }; Returns: Json }
+      reorder_case_material_line: {
+        Args: { p_case_id: string; p_direction: string; p_line_id: string }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

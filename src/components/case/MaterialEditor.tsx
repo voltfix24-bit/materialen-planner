@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,11 +42,14 @@ import {
   ArrowRightLeft,
   Pencil,
   ListPlus,
+  Wand2,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
-// ----- Fixed category order -----
+const PAGE_SIZE = 25;
+
 const CATEGORY_ORDER = [
   "Kabels",
   "MS Installatie",
@@ -69,6 +72,8 @@ const CATEGORY_ORDER = [
   "Algemeen",
 ];
 
+type LianderStatus = "active" | "inactive" | "not_found" | "unknown";
+
 type Line = {
   id: string;
   case_id: string;
@@ -88,6 +93,9 @@ type Line = {
   is_manual: boolean;
   is_auto_generated: boolean;
   source_rule: string | null;
+  liander_status: LianderStatus;
+  liander_description: string | null;
+  liander_unit: string | null;
 };
 
 type Category = {
@@ -97,7 +105,11 @@ type Category = {
   sort_order: number;
 };
 
-type Source = "articles" | "liander" | "manual";
+type SourceFilter =
+  | "all"
+  | "articles"
+  | "liander_active"
+  | "liander_inactive";
 
 export function MaterialEditor({ caseId }: { caseId: string }) {
   const qc = useQueryClient();
@@ -117,62 +129,27 @@ export function MaterialEditor({ caseId }: { caseId: string }) {
     },
   });
 
-  const { data: lines = [] } = useQuery<Line[]>({
+  // Single RPC: case lines + Liander match status (server-side join)
+  const { data: lines = [], isLoading } = useQuery<Line[]>({
     queryKey: ["material-lines", caseId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("case_material_lines")
-        .select("*")
-        .eq("case_id", caseId)
-        .order("sort_order", { ascending: true })
-        .order("article_number", { ascending: true, nullsFirst: false });
+      const { data, error } = await (supabase as any).rpc(
+        "get_case_material_lines_with_status",
+        { p_case_id: caseId },
+      );
       if (error) throw error;
       return (data as any) ?? [];
     },
   });
 
-  // Active Liander article numbers for per-line match status
-  const { data: lianderActiveSet } = useQuery({
-    queryKey: ["liander-active-set"],
-    queryFn: async () => {
-      const set = new Set<string>();
-      const { data, error } = await supabase
-        .from("liander_assortment_items")
-        .select("article_number")
-        .eq("active", true)
-        .limit(20000);
-      if (error) throw error;
-      for (const r of data ?? []) if (r.article_number) set.add(r.article_number);
-      return set;
-    },
-  });
-
-  const { data: lianderInactiveSet } = useQuery({
-    queryKey: ["liander-inactive-set"],
-    queryFn: async () => {
-      const set = new Set<string>();
-      const { data, error } = await supabase
-        .from("liander_assortment_items")
-        .select("article_number")
-        .eq("active", false)
-        .limit(20000);
-      if (error) throw error;
-      for (const r of data ?? []) if (r.article_number) set.add(r.article_number);
-      return set;
-    },
-  });
-
-  const matchStatus = (artno: string | null) => {
-    if (!artno) return "unknown" as const;
-    if (lianderActiveSet?.has(artno)) return "active" as const;
-    if (lianderInactiveSet?.has(artno)) return "inactive" as const;
-    return "missing" as const;
-  };
+  const invalidate = () =>
+    qc.invalidateQueries({ queryKey: ["material-lines", caseId] });
 
   // ---------- Mutations ----------
   const updateLine = useMutation({
     mutationFn: async (patch: Partial<Line> & { id: string }) => {
-      const { id, ...rest } = patch;
+      const { id, liander_status, liander_description, liander_unit, ...rest } =
+        patch as any;
       const next: any = { ...rest };
       if ("quantity" in rest || "return_quantity" in rest) {
         const cur = lines.find((l) => l.id === id)!;
@@ -190,7 +167,7 @@ export function MaterialEditor({ caseId }: { caseId: string }) {
         .eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["material-lines", caseId] }),
+    onSuccess: invalidate,
   });
 
   const deleteLine = useMutation({
@@ -202,7 +179,7 @@ export function MaterialEditor({ caseId }: { caseId: string }) {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["material-lines", caseId] });
+      invalidate();
       toast.success("Regel verwijderd");
     },
   });
@@ -211,7 +188,15 @@ export function MaterialEditor({ caseId }: { caseId: string }) {
     mutationFn: async (id: string) => {
       const src = lines.find((l) => l.id === id);
       if (!src) return;
-      const { id: _omit, ...rest } = src as any;
+      const {
+        id: _omit,
+        liander_status: _ls,
+        liander_description: _ld,
+        liander_unit: _lu,
+        created_at,
+        updated_at,
+        ...rest
+      } = src as any;
       const { error } = await supabase.from("case_material_lines").insert({
         ...rest,
         is_manual: true,
@@ -219,40 +204,64 @@ export function MaterialEditor({ caseId }: { caseId: string }) {
       });
       if (error) throw error;
     },
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["material-lines", caseId] }),
+    onSuccess: invalidate,
   });
 
-  const insertLines = useMutation({
-    mutationFn: async (rows: any[]) => {
-      const { error } = await supabase.from("case_material_lines").insert(rows);
+  const reorder = useMutation({
+    mutationFn: async ({ id, dir }: { id: string; dir: "up" | "down" }) => {
+      const { data, error } = await (supabase as any).rpc(
+        "reorder_case_material_line",
+        { p_case_id: caseId, p_line_id: id, p_direction: dir },
+      );
+      if (error) throw error;
+      if (data && data.success === false && data.error !== "no_neighbor") {
+        throw new Error(data.error);
+      }
+    },
+    onSuccess: invalidate,
+    onError: (e: any) => toast.error(e.message ?? "Verplaatsen mislukt"),
+  });
+
+  const moveCategory = useMutation({
+    mutationFn: async ({ id, categoryId }: { id: string; categoryId: string }) => {
+      const { error } = await (supabase as any).rpc(
+        "move_case_material_line_to_category",
+        {
+          p_case_id: caseId,
+          p_line_id: id,
+          p_category_id: categoryId,
+        },
+      );
       if (error) throw error;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["material-lines", caseId] });
+    onSuccess: invalidate,
+  });
+
+  const normalize = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await (supabase as any).rpc(
+        "normalize_case_material_sort_order",
+        { p_case_id: caseId },
+      );
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (d: any) => {
+      invalidate();
+      toast.success(`Volgorde hersteld (${d?.updated ?? 0} regels)`);
     },
   });
 
-  const moveSort = useMutation({
-    mutationFn: async ({ id, dir }: { id: string; dir: -1 | 1 }) => {
-      const cur = lines.find((l) => l.id === id);
-      if (!cur) return;
-      const peers = lines.filter((l) => l.category_id === cur.category_id);
-      peers.sort((a, b) => a.sort_order - b.sort_order);
-      const idx = peers.findIndex((p) => p.id === id);
-      const swap = peers[idx + dir];
-      if (!swap) return;
-      await supabase
-        .from("case_material_lines")
-        .update({ sort_order: swap.sort_order })
-        .eq("id", cur.id);
-      await supabase
-        .from("case_material_lines")
-        .update({ sort_order: cur.sort_order })
-        .eq("id", swap.id);
+  const bulkInsert = useMutation({
+    mutationFn: async (rows: any[]) => {
+      const { data, error } = await (supabase as any).rpc(
+        "bulk_add_case_material_lines",
+        { p_case_id: caseId, p_lines: rows },
+      );
+      if (error) throw error;
+      return data;
     },
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["material-lines", caseId] }),
+    onSuccess: invalidate,
   });
 
   // ---------- Stats ----------
@@ -266,12 +275,11 @@ export function MaterialEditor({ caseId }: { caseId: string }) {
       withReturn: lines.filter((l) => Number(l.return_quantity) > 0).length,
       withCharge: lines.filter((l) => l.charge_or_haspel_number).length,
       noLianderMatch: withQty.filter(
-        (l) => l.article_number && matchStatus(l.article_number) !== "active",
+        (l) => l.article_number && l.liander_status !== "active",
       ).length,
     };
-  }, [lines, lianderActiveSet, lianderInactiveSet]);
+  }, [lines]);
 
-  // ---------- Group lines by fixed categories ----------
   const grouped = useMemo(() => {
     const byName = new Map<string, Category>();
     for (const c of categories) byName.set(c.name, c);
@@ -299,57 +307,65 @@ export function MaterialEditor({ caseId }: { caseId: string }) {
           (a.article_number ?? "").localeCompare(b2.article_number ?? ""),
       );
     }
-
     return { blocks, orphans };
   }, [lines, categories]);
 
-  // ---------- Render ----------
+  const insertSinglePick = (a: any, source: "articles" | "liander", catId: string | null) => {
+    bulkInsert.mutate([
+      {
+        article_id: source === "articles" ? a.id : null,
+        article_number: a.article_number,
+        description: a.description ?? null,
+        unit: a.unit ?? null,
+        category_id: catId ?? a.category_id ?? null,
+        category_code: a.category_code ?? null,
+        quantity: 0,
+        used_quantity: 0,
+        return_quantity: 0,
+        total_quantity: 0,
+        is_manual: false,
+        is_auto_generated: false,
+        source_rule: source,
+      },
+    ]);
+  };
+
   return (
     <div className="space-y-4">
       <Card className="p-4">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
           <Stat label="Totaal regels" value={stats.total} />
           <Stat label="Totaal > 0" value={stats.withTotal} />
-          <Stat
-            label="Geen artikelnr"
-            value={stats.missingArt}
-            warn={stats.missingArt > 0}
-          />
-          <Stat
-            label="Negatief totaal"
-            value={stats.negative}
-            warn={stats.negative > 0}
-          />
+          <Stat label="Geen artikelnr" value={stats.missingArt} warn={stats.missingArt > 0} />
+          <Stat label="Negatief totaal" value={stats.negative} warn={stats.negative > 0} />
           <Stat label="Met retour" value={stats.withReturn} />
           <Stat label="Met charge/haspel" value={stats.withCharge} />
-          <Stat
-            label="Niet in Liander"
-            value={stats.noLianderMatch}
-            warn={stats.noLianderMatch > 0}
-          />
+          <Stat label="Niet in Liander" value={stats.noLianderMatch} warn={stats.noLianderMatch > 0} />
         </div>
       </Card>
 
       <Card className="sticky top-0 z-10 flex flex-wrap items-center gap-2 p-3 shadow-sm">
         <ArticlePicker
           buttonLabel="Artikel toevoegen"
-          onPick={(a, source) =>
-            insertLines.mutate([
-              buildLineFromPick(caseId, a, source, null, lines),
-            ])
-          }
+          onPick={(a, src) => insertSinglePick(a, src, null)}
         />
-        <Button
-          variant="outline"
-          onClick={() => setManualOpen({ categoryId: null })}
-        >
+        <Button variant="outline" onClick={() => setManualOpen({ categoryId: null })}>
           <Plus className="h-4 w-4" /> Handmatige regel
         </Button>
         <Button variant="outline" onClick={() => setBulkOpen(true)}>
-          <ListPlus className="h-4 w-4" /> Meerdere artikelen toevoegen
+          <ListPlus className="h-4 w-4" /> Meerdere artikelen
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => normalize.mutate()}
+          disabled={normalize.isPending}
+          title="Sort_order per categorie netjes hernummeren"
+        >
+          <Wand2 className="h-3.5 w-3.5" /> Volgorde herstellen
         </Button>
         <span className="ml-auto text-xs text-slate-500">
-          Wijzigingen markeren Verkooporder/Aanvulling automatisch als verouderd.
+          {isLoading ? "Laden…" : "Wijzigingen markeren Verkooporder/Aanvulling automatisch als verouderd."}
         </span>
       </Card>
 
@@ -358,12 +374,12 @@ export function MaterialEditor({ caseId }: { caseId: string }) {
           title="Zonder categorie"
           warn
           lines={grouped.orphans}
-          matchStatus={matchStatus}
           categories={categories}
           onUpdate={(p) => updateLine.mutate(p)}
           onDelete={(id) => deleteLine.mutate(id)}
           onDuplicate={(id) => duplicateLine.mutate(id)}
-          onMove={(id, dir) => moveSort.mutate({ id, dir })}
+          onReorder={(id, dir) => reorder.mutate({ id, dir })}
+          onMoveCategory={(id, categoryId) => moveCategory.mutate({ id, categoryId })}
           onAddArticle={() => setPickerForCategory("__none__")}
           onAddManual={() => setManualOpen({ categoryId: null })}
         />
@@ -374,35 +390,28 @@ export function MaterialEditor({ caseId }: { caseId: string }) {
           key={b.name}
           title={b.name}
           lines={b.lines}
-          matchStatus={matchStatus}
           categories={categories}
           onUpdate={(p) => updateLine.mutate(p)}
           onDelete={(id) => deleteLine.mutate(id)}
           onDuplicate={(id) => duplicateLine.mutate(id)}
-          onMove={(id, dir) => moveSort.mutate({ id, dir })}
+          onReorder={(id, dir) => reorder.mutate({ id, dir })}
+          onMoveCategory={(id, categoryId) => moveCategory.mutate({ id, categoryId })}
           onAddArticle={() => setPickerForCategory(b.category?.id ?? null)}
-          onAddManual={() =>
-            setManualOpen({ categoryId: b.category?.id ?? null })
-          }
+          onAddManual={() => setManualOpen({ categoryId: b.category?.id ?? null })}
         />
       ))}
 
-      {/* Picker scoped to a specific category */}
       {pickerForCategory !== null && (
         <CategoryArticleDialog
-          categoryId={pickerForCategory === "__none__" ? null : pickerForCategory}
           categoryName={
             pickerForCategory === "__none__"
               ? "Zonder categorie"
               : categories.find((c) => c.id === pickerForCategory)?.name ?? ""
           }
           onClose={() => setPickerForCategory(null)}
-          onPick={(a, source) => {
-            const catId =
-              pickerForCategory === "__none__" ? null : pickerForCategory;
-            insertLines.mutate([
-              buildLineFromPick(caseId, a, source, catId, lines),
-            ]);
+          onPick={(a, src) => {
+            const catId = pickerForCategory === "__none__" ? null : pickerForCategory;
+            insertSinglePick(a, src, catId);
             setPickerForCategory(null);
           }}
         />
@@ -410,12 +419,11 @@ export function MaterialEditor({ caseId }: { caseId: string }) {
 
       {manualOpen && (
         <ManualLineDialog
-          caseId={caseId}
           categories={categories}
           defaultCategoryId={manualOpen.categoryId}
           onClose={() => setManualOpen(null)}
           onSave={(row) => {
-            insertLines.mutate([row]);
+            bulkInsert.mutate([row]);
             setManualOpen(null);
           }}
         />
@@ -423,11 +431,11 @@ export function MaterialEditor({ caseId }: { caseId: string }) {
 
       {bulkOpen && (
         <BulkAddDialog
-          caseId={caseId}
-          existingMaxSort={Math.max(0, ...lines.map((l) => l.sort_order))}
           onClose={() => setBulkOpen(false)}
           onInsert={(rows) => {
-            insertLines.mutate(rows);
+            bulkInsert.mutate(rows, {
+              onSuccess: (d: any) => toast.success(`${d?.inserted ?? rows.length} regels toegevoegd`),
+            });
             setBulkOpen(false);
           }}
         />
@@ -436,106 +444,63 @@ export function MaterialEditor({ caseId }: { caseId: string }) {
   );
 }
 
-// ---------- Helpers ----------
-function buildLineFromPick(
-  caseId: string,
-  a: any,
-  source: Source,
-  categoryId: string | null,
-  existing: Line[],
-) {
-  const nextSort = Math.max(0, ...existing.map((l) => l.sort_order)) + 10;
-  return {
-    case_id: caseId,
-    article_id: source === "articles" ? a.id : null,
-    article_number: a.article_number ?? null,
-    description: a.description ?? null,
-    unit: a.unit ?? null,
-    category_id: categoryId ?? a.category_id ?? null,
-    category_code: a.category_code ?? null,
-    sort_order: nextSort,
-    quantity: 0,
-    used_quantity: 0,
-    return_quantity: 0,
-    total_quantity: 0,
-    is_manual: source === "manual",
-    is_auto_generated: false,
-    source_rule:
-      source === "articles"
-        ? "articles"
-        : source === "liander"
-          ? "liander"
-          : "manual",
-  };
-}
-
-function Stat({
-  label,
-  value,
-  warn,
-}: {
-  label: string;
-  value: number | string;
-  warn?: boolean;
-}) {
+// ---------- helpers / UI bits ----------
+function Stat({ label, value, warn }: { label: string; value: number | string; warn?: boolean }) {
   return (
     <div>
       <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
-      <div
-        className={cn(
-          "mt-1 text-xl font-semibold tabular-nums",
-          warn && "text-amber-600",
-        )}
-      >
+      <div className={cn("mt-1 text-xl font-semibold tabular-nums", warn && "text-amber-600")}>
         {value}
       </div>
     </div>
   );
 }
 
-// ---------- Category block ----------
+function useDebounced<T>(value: T, delay = 300): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return v;
+}
+
 function CategoryBlock({
   title,
   lines,
   warn,
-  matchStatus,
   categories,
   onUpdate,
   onDelete,
   onDuplicate,
-  onMove,
+  onReorder,
+  onMoveCategory,
   onAddArticle,
   onAddManual,
 }: {
   title: string;
   lines: Line[];
   warn?: boolean;
-  matchStatus: (a: string | null) => "active" | "inactive" | "missing" | "unknown";
   categories: Category[];
   onUpdate: (p: Partial<Line> & { id: string }) => void;
   onDelete: (id: string) => void;
   onDuplicate: (id: string) => void;
-  onMove: (id: string, dir: -1 | 1) => void;
+  onReorder: (id: string, dir: "up" | "down") => void;
+  onMoveCategory: (id: string, categoryId: string) => void;
   onAddArticle: () => void;
   onAddManual: () => void;
 }) {
   const [open, setOpen] = useState(true);
   const withQty = lines.filter((l) => Number(l.total_quantity) > 0).length;
-  const missing = lines.filter(
-    (l) => Number(l.total_quantity) > 0 && !l.article_number,
-  ).length;
+  const missing = lines.filter((l) => Number(l.total_quantity) > 0 && !l.article_number).length;
 
   return (
     <Card className="overflow-hidden p-0">
       <Collapsible open={open} onOpenChange={setOpen}>
         <div className="flex items-center justify-between gap-2 bg-slate-50 px-3 py-2">
           <CollapsibleTrigger className="flex flex-1 items-center gap-3 text-left">
-            <ChevronDown
-              className={cn("h-4 w-4 transition-transform", !open && "-rotate-90")}
-            />
-            <span className={cn("font-semibold", warn && "text-amber-700")}>
-              {title}
-            </span>
+            <ChevronDown className={cn("h-4 w-4 transition-transform", !open && "-rotate-90")} />
+            <span className={cn("font-semibold", warn && "text-amber-700")}>{title}</span>
             <Badge variant="secondary">{lines.length} regels</Badge>
             {withQty > 0 && <Badge variant="outline">{withQty} {">"} 0</Badge>}
             {missing > 0 && (
@@ -583,12 +548,12 @@ function CategoryBlock({
                     <LineRow
                       key={l.id}
                       line={l}
-                      matchStatus={matchStatus}
                       categories={categories}
                       onUpdate={onUpdate}
                       onDelete={onDelete}
                       onDuplicate={onDuplicate}
-                      onMove={onMove}
+                      onReorder={onReorder}
+                      onMoveCategory={onMoveCategory}
                     />
                   ))}
                 </tbody>
@@ -601,27 +566,25 @@ function CategoryBlock({
   );
 }
 
-// ---------- Single line ----------
 function LineRow({
   line: l,
-  matchStatus,
   categories,
   onUpdate,
   onDelete,
   onDuplicate,
-  onMove,
+  onReorder,
+  onMoveCategory,
 }: {
   line: Line;
-  matchStatus: (a: string | null) => "active" | "inactive" | "missing" | "unknown";
   categories: Category[];
   onUpdate: (p: Partial<Line> & { id: string }) => void;
   onDelete: (id: string) => void;
   onDuplicate: (id: string) => void;
-  onMove: (id: string, dir: -1 | 1) => void;
+  onReorder: (id: string, dir: "up" | "down") => void;
+  onMoveCategory: (id: string, categoryId: string) => void;
 }) {
   const negative = Number(l.total_quantity) < 0;
   const missingArt = !l.article_number && Number(l.total_quantity) > 0;
-  const ms = matchStatus(l.article_number);
   const isManual = l.is_manual && (l.source_rule === "manual" || !l.article_id);
 
   return (
@@ -632,17 +595,13 @@ function LineRow({
         negative && "bg-red-50/60",
       )}
     >
-      <td className="px-2 py-1.5 text-xs text-slate-400 tabular-nums">
-        {l.sort_order}
-      </td>
+      <td className="px-2 py-1.5 text-xs text-slate-400 tabular-nums">{l.sort_order}</td>
       <td className="px-2 py-1.5 font-mono text-xs">
         {isManual ? (
           <TextCell
             value={l.article_number ?? ""}
             placeholder="—"
-            onChange={(v) =>
-              onUpdate({ id: l.id, article_number: v || (null as any) })
-            }
+            onChange={(v) => onUpdate({ id: l.id, article_number: v || (null as any) })}
           />
         ) : (
           <div className="flex items-center gap-1">
@@ -662,7 +621,7 @@ function LineRow({
             onChange={(v) => onUpdate({ id: l.id, description: v || (null as any) })}
           />
         ) : (
-          (l.description || "—")
+          l.description || "—"
         )}
       </td>
       <td className="px-2 py-1.5 text-slate-500">
@@ -677,41 +636,22 @@ function LineRow({
         )}
       </td>
       <td className="px-2 py-1.5">
-        <NumberCell
-          value={l.quantity}
-          onChange={(v) => onUpdate({ id: l.id, quantity: v })}
-        />
+        <NumberCell value={l.quantity} onChange={(v) => onUpdate({ id: l.id, quantity: v })} />
       </td>
       <td className="px-2 py-1.5">
-        <NumberCell
-          value={l.used_quantity}
-          onChange={(v) => onUpdate({ id: l.id, used_quantity: v })}
-        />
+        <NumberCell value={l.used_quantity} onChange={(v) => onUpdate({ id: l.id, used_quantity: v })} />
       </td>
       <td className="px-2 py-1.5">
-        <NumberCell
-          value={l.return_quantity}
-          onChange={(v) => onUpdate({ id: l.id, return_quantity: v })}
-        />
+        <NumberCell value={l.return_quantity} onChange={(v) => onUpdate({ id: l.id, return_quantity: v })} />
       </td>
-      <td
-        className={cn(
-          "px-2 py-1.5 text-right font-medium tabular-nums",
-          negative && "text-red-600",
-        )}
-      >
+      <td className={cn("px-2 py-1.5 text-right font-medium tabular-nums", negative && "text-red-600")}>
         {Number(l.total_quantity)}
       </td>
       <td className="px-2 py-1.5">
         <TextCell
           value={l.charge_or_haspel_number ?? ""}
           placeholder="—"
-          onChange={(v) =>
-            onUpdate({
-              id: l.id,
-              charge_or_haspel_number: v || (null as any),
-            })
-          }
+          onChange={(v) => onUpdate({ id: l.id, charge_or_haspel_number: v || (null as any) })}
         />
       </td>
       <td className="px-2 py-1.5">
@@ -724,48 +664,26 @@ function LineRow({
       <td className="px-2 py-1.5">
         <div className="flex flex-col gap-1">
           <SourceBadge source={l.source_rule} />
-          <LianderBadge status={ms} />
+          <LianderBadge status={l.liander_status} />
         </div>
       </td>
       <td className="px-2 py-1.5 text-right">
         <div className="inline-flex items-center">
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => onMove(l.id, -1)}
-            title="Omhoog"
-          >
+          <Button size="icon" variant="ghost" onClick={() => onReorder(l.id, "up")} title="Omhoog">
             <ArrowUp className="h-3.5 w-3.5" />
           </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => onMove(l.id, 1)}
-            title="Omlaag"
-          >
+          <Button size="icon" variant="ghost" onClick={() => onReorder(l.id, "down")} title="Omlaag">
             <ArrowDown className="h-3.5 w-3.5" />
           </Button>
           <MoveCategoryButton
             categories={categories}
             currentId={l.category_id}
-            onPick={(catId) =>
-              onUpdate({ id: l.id, category_id: catId, category_code: null })
-            }
+            onPick={(catId) => onMoveCategory(l.id, catId)}
           />
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => onDuplicate(l.id)}
-            title="Dupliceren"
-          >
+          <Button size="icon" variant="ghost" onClick={() => onDuplicate(l.id)} title="Dupliceren">
             <Copy className="h-3.5 w-3.5" />
           </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => onDelete(l.id)}
-            title="Verwijderen"
-          >
+          <Button size="icon" variant="ghost" onClick={() => onDelete(l.id)} title="Verwijderen">
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -776,65 +694,26 @@ function LineRow({
 
 function SourceBadge({ source }: { source: string | null }) {
   const s = (source ?? "").toLowerCase();
-  if (s === "liander")
-    return (
-      <Badge variant="outline" className="text-[10px]">
-        Liander
-      </Badge>
-    );
-  if (s === "articles")
-    return (
-      <Badge variant="outline" className="text-[10px]">
-        Artikelbestand
-      </Badge>
-    );
+  if (s === "liander") return <Badge variant="outline" className="text-[10px]">Liander</Badge>;
+  if (s === "articles") return <Badge variant="outline" className="text-[10px]">Artikelbestand</Badge>;
   if (s === "manual" || s === "manual_add")
-    return (
-      <Badge variant="outline" className="text-[10px]">
-        Handmatig
-      </Badge>
-    );
-  if (s.startsWith("auto"))
-    return (
-      <Badge variant="outline" className="text-[10px]">
-        Auto
-      </Badge>
-    );
-  return (
-    <Badge variant="outline" className="text-[10px] text-slate-400">
-      —
-    </Badge>
-  );
+    return <Badge variant="outline" className="text-[10px]">Handmatig</Badge>;
+  if (s.startsWith("auto")) return <Badge variant="outline" className="text-[10px]">Auto</Badge>;
+  return <Badge variant="outline" className="text-[10px] text-slate-400">—</Badge>;
 }
 
-function LianderBadge({
-  status,
-}: {
-  status: "active" | "inactive" | "missing" | "unknown";
-}) {
+function LianderBadge({ status }: { status: LianderStatus }) {
   if (status === "active")
-    return (
-      <Badge className="bg-emerald-600 text-[10px] hover:bg-emerald-600">
-        Liander actief
-      </Badge>
-    );
+    return <Badge className="bg-emerald-600 text-[10px] hover:bg-emerald-600">Liander actief</Badge>;
   if (status === "inactive")
-    return (
-      <Badge variant="destructive" className="text-[10px]">
-        Liander inactief
-      </Badge>
-    );
-  if (status === "missing")
+    return <Badge variant="destructive" className="text-[10px]">Liander inactief</Badge>;
+  if (status === "not_found")
     return (
       <Badge variant="destructive" className="bg-amber-600 text-[10px] hover:bg-amber-600">
         Niet in Liander
       </Badge>
     );
-  return (
-    <Badge variant="outline" className="text-[10px] text-slate-400">
-      —
-    </Badge>
-  );
+  return <Badge variant="outline" className="text-[10px] text-slate-400">—</Badge>;
 }
 
 function MoveCategoryButton({
@@ -877,15 +756,11 @@ function MoveCategoryButton({
   );
 }
 
-// ---------- Inline cells ----------
-function NumberCell({
-  value,
-  onChange,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-}) {
+function NumberCell({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   const [v, setV] = useState(String(value ?? 0));
+  useEffect(() => {
+    setV(String(value ?? 0));
+  }, [value]);
   return (
     <Input
       type="number"
@@ -910,6 +785,7 @@ function TextCell({
   onChange: (v: string) => void;
 }) {
   const [v, setV] = useState(value ?? "");
+  useEffect(() => setV(value ?? ""), [value]);
   return (
     <Input
       value={v}
@@ -921,59 +797,70 @@ function TextCell({
   );
 }
 
-// ---------- Article picker (multi-source) ----------
+// ---------- Server-side article picker ----------
 function ArticlePicker({
   buttonLabel,
   onPick,
 }: {
   buttonLabel: string;
-  onPick: (a: any, source: Source) => void;
+  onPick: (a: any, source: "articles" | "liander") => void;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const [src, setSrc] = useState<"all" | Source>("all");
+  const [src, setSrc] = useState<SourceFilter>("all");
+  const [pageArt, setPageArt] = useState(0);
+  const [pageLia, setPageLia] = useState(0);
 
-  const term = q.trim();
+  const term = useDebounced(q.trim(), 300);
+  useEffect(() => {
+    setPageArt(0);
+    setPageLia(0);
+  }, [term, src]);
+
+  const showArticles = src === "all" || src === "articles";
+  const showLianderActive = src === "all" || src === "liander_active";
+  const showLianderInactive = src === "liander_inactive";
 
   const articlesQ = useQuery({
-    queryKey: ["picker-articles", term],
-    enabled: open && term.length >= 1 && (src === "all" || src === "articles"),
+    queryKey: ["picker-articles", term, pageArt],
+    enabled: open && term.length >= 1 && showArticles,
     queryFn: async () => {
       const t = `%${term}%`;
+      const from = pageArt * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
       const { data, error } = await supabase
         .from("articles")
-        .select(
-          "id, article_number, description, unit, category_id, category_code",
-        )
+        .select("id, article_number, description, unit, category_id, category_code")
         .eq("active", true)
         .or(`article_number.ilike.${t},description.ilike.${t}`)
-        .limit(40);
+        .order("article_number")
+        .range(from, to);
       if (error) throw error;
       return data ?? [];
     },
   });
 
   const lianderQ = useQuery({
-    queryKey: ["picker-liander", term],
-    enabled: open && term.length >= 1 && (src === "all" || src === "liander"),
+    queryKey: ["picker-liander", term, src, pageLia],
+    enabled:
+      open && term.length >= 1 && (showLianderActive || showLianderInactive),
     queryFn: async () => {
       const t = `%${term}%`;
-      const { data, error } = await supabase
+      const from = pageLia * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      let qb = supabase
         .from("liander_assortment_items")
         .select("id, article_number, description, unit, active")
         .or(`article_number.ilike.${t},description.ilike.${t}`)
-        .order("active", { ascending: false })
-        .limit(40);
+        .order("article_number")
+        .range(from, to);
+      if (showLianderActive && !showLianderInactive) qb = qb.eq("active", true);
+      if (showLianderInactive) qb = qb.eq("active", false);
+      const { data, error } = await qb;
       if (error) throw error;
       return data ?? [];
     },
   });
-
-  const inactiveHit =
-    src !== "articles" &&
-    (lianderQ.data ?? []).some(
-      (r: any) => r.article_number === term && !r.active,
-    );
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -982,7 +869,7 @@ function ArticlePicker({
           <Plus className="h-4 w-4" /> {buttonLabel}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[640px] p-0" align="start">
+      <PopoverContent className="w-[680px] p-0" align="start">
         <div className="flex items-center gap-2 border-b p-2">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -993,54 +880,58 @@ function ArticlePicker({
               placeholder="Zoek op artikelnummer of omschrijving"
               className="pl-8"
             />
+            {q !== term && (
+              <Loader2 className="absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-slate-400" />
+            )}
           </div>
-          <Select value={src} onValueChange={(v) => setSrc(v as any)}>
-            <SelectTrigger className="w-44">
+          <Select value={src} onValueChange={(v) => setSrc(v as SourceFilter)}>
+            <SelectTrigger className="w-48">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Alle bronnen</SelectItem>
               <SelectItem value="articles">Artikelbestand</SelectItem>
-              <SelectItem value="liander">Liander</SelectItem>
+              <SelectItem value="liander_active">Liander actief</SelectItem>
+              <SelectItem value="liander_inactive">Liander inactief</SelectItem>
             </SelectContent>
           </Select>
         </div>
-        <div className="max-h-[420px] overflow-y-auto">
+
+        <div className="max-h-[440px] overflow-y-auto">
           {term.length === 0 && (
             <div className="p-4 text-center text-xs text-slate-500">
-              Begin met typen om te zoeken in het artikelbestand en de Liander
-              Assortimentslijst.
-            </div>
-          )}
-          {inactiveHit && (
-            <div className="m-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800">
-              Let op: dit artikel staat niet actief in de huidige Liander
-              Assortimentslijst.
+              Begin met typen om te zoeken (server-side, max {PAGE_SIZE} per bron per pagina).
             </div>
           )}
 
-          {(src === "all" || src === "articles") && term.length > 0 && (
+          {showArticles && term.length > 0 && (
             <PickerSection
               title="Artikelbestand"
-              loading={articlesQ.isLoading}
+              loading={articlesQ.isLoading || articlesQ.isFetching}
               rows={articlesQ.data ?? []}
               onPick={(r) => {
                 onPick(r, "articles");
                 setOpen(false);
                 setQ("");
               }}
+              hasMore={(articlesQ.data ?? []).length === PAGE_SIZE}
+              onMore={() => setPageArt((p) => p + 1)}
+              page={pageArt}
             />
           )}
-          {(src === "all" || src === "liander") && term.length > 0 && (
+
+          {(showLianderActive || showLianderInactive) && term.length > 0 && (
             <PickerSection
-              title="Liander Assortimentslijst"
-              loading={lianderQ.isLoading}
+              title={
+                showLianderInactive
+                  ? "Liander Assortimentslijst (inactief)"
+                  : "Liander Assortimentslijst (actief)"
+              }
+              loading={lianderQ.isLoading || lianderQ.isFetching}
               rows={lianderQ.data ?? []}
               renderExtra={(r) =>
                 r.active === false ? (
-                  <Badge variant="destructive" className="text-[10px]">
-                    inactief
-                  </Badge>
+                  <Badge variant="destructive" className="text-[10px]">inactief</Badge>
                 ) : null
               }
               onPick={(r) => {
@@ -1054,6 +945,9 @@ function ArticlePicker({
                 setOpen(false);
                 setQ("");
               }}
+              hasMore={(lianderQ.data ?? []).length === PAGE_SIZE}
+              onMore={() => setPageLia((p) => p + 1)}
+              page={pageLia}
             />
           )}
         </div>
@@ -1068,21 +962,28 @@ function PickerSection({
   rows,
   onPick,
   renderExtra,
+  hasMore,
+  onMore,
+  page,
 }: {
   title: string;
   loading: boolean;
   rows: any[];
   onPick: (r: any) => void;
   renderExtra?: (r: any) => React.ReactNode;
+  hasMore?: boolean;
+  onMore?: () => void;
+  page?: number;
 }) {
   return (
     <div>
-      <div className="bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-        {title}
+      <div className="flex items-center justify-between bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+        <span>{title}</span>
+        {typeof page === "number" && page > 0 && (
+          <span className="text-slate-400">pagina {page + 1}</span>
+        )}
       </div>
-      {loading && (
-        <div className="px-3 py-2 text-xs text-slate-500">Laden…</div>
-      )}
+      {loading && <div className="px-3 py-2 text-xs text-slate-500">Laden…</div>}
       {!loading && rows.length === 0 && (
         <div className="px-3 py-2 text-xs text-slate-400">Geen resultaten.</div>
       )}
@@ -1093,9 +994,7 @@ function PickerSection({
           className="flex w-full items-center justify-between gap-3 border-b px-3 py-2 text-left text-sm last:border-0 hover:bg-slate-50"
         >
           <div>
-            <div className="font-mono text-xs text-slate-500">
-              {r.article_number}
-            </div>
+            <div className="font-mono text-xs text-slate-500">{r.article_number}</div>
             <div>{r.description || "—"}</div>
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-400">
@@ -1104,21 +1003,26 @@ function PickerSection({
           </div>
         </button>
       ))}
+      {hasMore && onMore && (
+        <button
+          onClick={onMore}
+          className="block w-full border-t px-3 py-2 text-center text-xs text-primary hover:bg-slate-50"
+        >
+          Meer laden
+        </button>
+      )}
     </div>
   );
 }
 
-// ---------- Category-scoped picker dialog ----------
 function CategoryArticleDialog({
-  categoryId,
   categoryName,
   onClose,
   onPick,
 }: {
-  categoryId: string | null;
   categoryName: string;
   onClose: () => void;
-  onPick: (a: any, source: Source) => void;
+  onPick: (a: any, source: "articles" | "liander") => void;
 }) {
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -1131,29 +1035,21 @@ function CategoryArticleDialog({
         </div>
         <div>
           <ArticlePicker buttonLabel="Zoeken" onPick={onPick} />
-          <span className="ml-2 text-xs text-slate-400">
-            (categorie:&nbsp;{categoryName})
-          </span>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Sluiten
-          </Button>
+          <Button variant="outline" onClick={onClose}>Sluiten</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-// ---------- Manual line dialog ----------
 function ManualLineDialog({
-  caseId,
   categories,
   defaultCategoryId,
   onClose,
   onSave,
 }: {
-  caseId: string;
   categories: Category[];
   defaultCategoryId: string | null;
   onClose: () => void;
@@ -1194,15 +1090,11 @@ function ManualLineDialog({
               value={catId ?? "__none"}
               onValueChange={(v) => setCatId(v === "__none" ? null : v)}
             >
-              <SelectTrigger>
-                <SelectValue placeholder="Kies categorie" />
-              </SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="Kies categorie" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none">— Geen —</SelectItem>
                 {categories.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -1225,19 +1117,14 @@ function ManualLineDialog({
         </div>
         {missingArtWarn && (
           <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800">
-            <AlertTriangle className="mr-1 inline h-3 w-3" /> Artikelnummer is
-            verplicht zodra het totaal &gt; 0 is — anders blokkeert de export
-            deze regel.
+            <AlertTriangle className="mr-1 inline h-3 w-3" /> Artikelnummer is verplicht zodra het totaal &gt; 0 is.
           </div>
         )}
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Annuleren
-          </Button>
+          <Button variant="outline" onClick={onClose}>Annuleren</Button>
           <Button
             onClick={() =>
               onSave({
-                case_id: caseId,
                 article_number: artno.trim() || null,
                 description: desc.trim() || null,
                 unit: unit.trim() || null,
@@ -1251,7 +1138,6 @@ function ManualLineDialog({
                 is_manual: true,
                 is_auto_generated: false,
                 source_rule: "manual",
-                sort_order: 0,
               })
             }
           >
@@ -1263,15 +1149,7 @@ function ManualLineDialog({
   );
 }
 
-function Field({
-  label,
-  children,
-  full,
-}: {
-  label: string;
-  children: React.ReactNode;
-  full?: boolean;
-}) {
+function Field({ label, children, full }: { label: string; children: React.ReactNode; full?: boolean }) {
   return (
     <div className={cn("space-y-1", full && "col-span-2")}>
       <div className="text-xs font-medium text-slate-600">{label}</div>
@@ -1280,15 +1158,11 @@ function Field({
   );
 }
 
-// ---------- Bulk add dialog ----------
+// ---------- Bulk add via RPC ----------
 function BulkAddDialog({
-  caseId,
-  existingMaxSort,
   onClose,
   onInsert,
 }: {
-  caseId: string;
-  existingMaxSort: number;
   onClose: () => void;
   onInsert: (rows: any[]) => void;
 }) {
@@ -1300,13 +1174,10 @@ function BulkAddDialog({
   } | null>(null);
 
   const parseInput = () => {
-    const lines = text
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
+    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     return lines
       .map((l) => {
-        const parts = l.split(/[;,\t]/).map((p) => p.trim());
+        const parts = l.split(/[;,\t\s]+/).map((p) => p.trim()).filter(Boolean);
         const artno = parts[0] ?? "";
         const qty = Number((parts[1] ?? "1").replace(",", "."));
         return { artno, qty: Number.isFinite(qty) ? qty : 1 };
@@ -1323,68 +1194,33 @@ function BulkAddDialog({
         return;
       }
       const numbers = [...new Set(parsed.map((p) => p.artno))];
-      const [arts, lia] = await Promise.all([
-        supabase
-          .from("articles")
-          .select("id, article_number, description, unit, category_id, category_code")
-          .in("article_number", numbers)
-          .eq("active", true),
-        supabase
-          .from("liander_assortment_items")
-          .select("id, article_number, description, unit")
-          .in("article_number", numbers)
-          .eq("active", true),
-      ]);
-      if (arts.error) throw arts.error;
-      if (lia.error) throw lia.error;
-      const artMap = new Map<string, any>();
-      for (const a of arts.data ?? []) artMap.set(a.article_number, a);
-      const liaMap = new Map<string, any>();
-      for (const a of lia.data ?? []) liaMap.set(a.article_number, a);
+      const { data, error } = await (supabase as any).rpc("lookup_material_articles", {
+        p_article_numbers: numbers,
+      });
+      if (error) throw error;
+
+      const lookupMap = new Map<string, any>();
+      for (const r of data ?? []) lookupMap.set(r.article_number, r);
 
       const found: any[] = [];
       const notFound: { artno: string; qty: number }[] = [];
-      let sort = existingMaxSort;
       for (const p of parsed) {
-        const fromArt = artMap.get(p.artno);
-        const fromLia = liaMap.get(p.artno);
-        if (fromArt) {
-          sort += 10;
+        const hit = lookupMap.get(p.artno);
+        if (hit && hit.found && (hit.source === "articles" || hit.source === "both" || hit.source === "liander")) {
           found.push({
-            case_id: caseId,
-            article_id: fromArt.id,
-            article_number: fromArt.article_number,
-            description: fromArt.description,
-            unit: fromArt.unit,
-            category_id: fromArt.category_id,
-            category_code: fromArt.category_code,
-            sort_order: sort,
+            article_id: null, // RPC doesn't return id; safe — article_id is optional snapshot link
+            article_number: hit.article_number,
+            description: hit.description,
+            unit: hit.unit,
+            category_id: hit.category_id ?? null,
+            category_code: hit.category_code ?? null,
             quantity: p.qty,
             used_quantity: 0,
             return_quantity: 0,
             total_quantity: p.qty,
             is_manual: false,
             is_auto_generated: false,
-            source_rule: "articles",
-          });
-        } else if (fromLia) {
-          sort += 10;
-          found.push({
-            case_id: caseId,
-            article_id: null,
-            article_number: fromLia.article_number,
-            description: fromLia.description,
-            unit: fromLia.unit,
-            category_id: null,
-            category_code: null,
-            sort_order: sort,
-            quantity: p.qty,
-            used_quantity: 0,
-            return_quantity: 0,
-            total_quantity: p.qty,
-            is_manual: false,
-            is_auto_generated: false,
-            source_rule: "liander",
+            source_rule: hit.source === "articles" || hit.source === "both" ? "articles" : "liander",
           });
         } else {
           notFound.push(p);
@@ -1401,34 +1237,26 @@ function BulkAddDialog({
   const insertFound = () => {
     if (!result || result.found.length === 0) return;
     onInsert(result.found);
-    toast.success(`${result.found.length} regels toegevoegd`);
   };
 
   const insertNotFoundManual = () => {
     if (!result) return;
-    let sort = existingMaxSort + result.found.length * 10;
-    const rows = result.notFound.map((p) => {
-      sort += 10;
-      return {
-        case_id: caseId,
-        article_id: null,
-        article_number: p.artno,
-        description: null,
-        unit: null,
-        category_id: null,
-        category_code: null,
-        sort_order: sort,
-        quantity: p.qty,
-        used_quantity: 0,
-        return_quantity: 0,
-        total_quantity: p.qty,
-        is_manual: true,
-        is_auto_generated: false,
-        source_rule: "manual",
-      };
-    });
+    const rows = result.notFound.map((p) => ({
+      article_id: null,
+      article_number: p.artno,
+      description: null,
+      unit: null,
+      category_id: null,
+      category_code: null,
+      quantity: p.qty,
+      used_quantity: 0,
+      return_quantity: 0,
+      total_quantity: p.qty,
+      is_manual: true,
+      is_auto_generated: false,
+      source_rule: "manual",
+    }));
     onInsert(rows);
-    toast.success(`${rows.length} handmatige regels toegevoegd`);
   };
 
   return (
@@ -1438,9 +1266,9 @@ function BulkAddDialog({
           <DialogTitle>Meerdere artikelen toevoegen</DialogTitle>
         </DialogHeader>
         <div className="space-y-2 text-xs text-slate-500">
-          Plak regels in het formaat <code>artikelnummer;aantal</code> of{" "}
-          <code>artikelnummer,aantal</code>. Eén regel per artikel. Aantal is
-          optioneel (standaard 1).
+          Plak regels in het formaat <code>artikelnummer;aantal</code>,{" "}
+          <code>artikelnummer,aantal</code> of gescheiden door spatie/tab. Aantal optioneel (default 1).
+          Lookup gebeurt server-side in artikelbestand + actieve Liander.
         </div>
         <Textarea
           value={text}
@@ -1451,6 +1279,7 @@ function BulkAddDialog({
         />
         <div className="flex gap-2">
           <Button onClick={lookup} disabled={busy}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             {busy ? "Zoeken…" : "Zoeken in bronnen"}
           </Button>
           {result && (
@@ -1473,15 +1302,11 @@ function BulkAddDialog({
                 Gevonden ({result.found.length})
               </div>
               <div className="max-h-48 overflow-y-auto rounded border bg-slate-50 p-2 text-xs">
-                {result.found.length === 0 && (
-                  <div className="text-slate-400">—</div>
-                )}
+                {result.found.length === 0 && <div className="text-slate-400">—</div>}
                 {result.found.map((r, i) => (
                   <div key={i} className="font-mono">
                     {r.article_number} ×{r.quantity}{" "}
-                    <span className="text-slate-400">
-                      ({r.source_rule})
-                    </span>
+                    <span className="text-slate-400">({r.source_rule})</span>
                   </div>
                 ))}
               </div>
@@ -1491,22 +1316,16 @@ function BulkAddDialog({
                 Niet gevonden ({result.notFound.length})
               </div>
               <div className="max-h-48 overflow-y-auto rounded border bg-amber-50 p-2 text-xs">
-                {result.notFound.length === 0 && (
-                  <div className="text-slate-400">—</div>
-                )}
+                {result.notFound.length === 0 && <div className="text-slate-400">—</div>}
                 {result.notFound.map((r, i) => (
-                  <div key={i} className="font-mono">
-                    {r.artno} ×{r.qty}
-                  </div>
+                  <div key={i} className="font-mono">{r.artno} ×{r.qty}</div>
                 ))}
               </div>
             </div>
           </div>
         )}
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Sluiten
-          </Button>
+          <Button variant="outline" onClick={onClose}>Sluiten</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
