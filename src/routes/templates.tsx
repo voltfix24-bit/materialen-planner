@@ -428,6 +428,16 @@ function TemplatePreviewDialog({ templateId, onClose }: { templateId: string; on
       (l.description ?? "").toLowerCase().includes(q));
   }, [lines, filter]);
 
+  const unmappedCount = useMemo(
+    () => lines.filter((l: any) =>
+      l.category_id == null
+      && l.excel_category_id != null
+      && !l.is_section_header
+      && !l.is_blank_or_separator
+    ).length,
+    [lines],
+  );
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-5xl">
