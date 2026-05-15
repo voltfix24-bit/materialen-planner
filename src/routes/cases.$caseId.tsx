@@ -170,7 +170,15 @@ function CaseDetail() {
                 ))}
               </SelectContent>
             </Select>
-            <Button onClick={exportCsv}>
+            <Button
+              onClick={exportCsv}
+              disabled={settingsMissing}
+              title={
+                settingsMissing
+                  ? "Vul eerst so_number, so_customernumber en so_project in op het tabblad Overzicht"
+                  : undefined
+              }
+            >
               <Download className="h-4 w-4" /> CSV exporteren
             </Button>
           </div>
