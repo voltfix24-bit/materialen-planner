@@ -35,7 +35,7 @@ export function ApplyTemplateButton({ caseId }: { caseId: string }) {
 function ApplyTemplateDialog({ caseId, onClose }: { caseId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const [templateId, setTemplateId] = useState<string | null>(null);
-  const [mode, setMode] = useState<"append" | "replace_template_lines">("append");
+  const [mode, setMode] = useState<"append_missing" | "replace_template_lines">("append_missing");
 
   const { data: templates = [] } = useQuery({
     queryKey: ["material_templates_active"],
