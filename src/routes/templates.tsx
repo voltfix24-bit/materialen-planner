@@ -261,11 +261,11 @@ function ImportTemplateDialog({
         "process_material_template_import",
         {
           p_name: name.trim(),
-          p_version: version.trim() || null,
+          p_version: (version.trim() || null) as any,
           p_source_file_name: file.name,
           p_source_sheet_name: parsed.sheet_name,
           p_lines: payload as any,
-          p_notes: null,
+          p_notes: null as any,
         },
       );
       if (rpcErr) throw rpcErr;
