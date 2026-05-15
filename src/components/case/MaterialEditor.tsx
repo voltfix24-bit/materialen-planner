@@ -672,6 +672,20 @@ function LineRow({
         <div className="flex flex-col gap-1">
           <SourceBadge source={l.source_rule} />
           <LianderBadge status={l.liander_status} />
+          {l.formula_status === "stored_not_active" && (
+            <Badge
+              variant="outline"
+              className="border-amber-300 bg-amber-50 text-[10px] text-amber-900"
+              title={l.formula_source_text ?? "Formule opgeslagen, nog niet automatisch berekend"}
+            >
+              Formule (opgeslagen)
+            </Badge>
+          )}
+          {l.excel_row_number && (
+            <span className="text-[10px] text-slate-400" title="Bron: Excel-rij">
+              rij {l.excel_row_number}
+            </span>
+          )}
         </div>
       </td>
       <td className="px-2 py-1.5 text-right">
