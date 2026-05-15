@@ -47,6 +47,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { ApplyTemplateButton } from "./ApplyTemplateDialog";
 
 const PAGE_SIZE = 25;
 
