@@ -102,7 +102,10 @@ function ApplyTemplateDialog({ caseId, onClose }: { caseId: string; onClose: () 
     },
     onSuccess: (res) => {
       toast.success(
-        `Template toegepast: ${res?.lines_created_count ?? 0} regels (${res?.formula_lines_count ?? 0} formule-placeholders)`,
+        `Template toegepast: ${res?.lines_created_count ?? 0} nieuw, ` +
+          `${res?.skipped_existing_count ?? 0} bestaand, ` +
+          `${res?.skipped_headers_count ?? 0} headers overgeslagen, ` +
+          `${res?.formula_lines_count ?? 0} formule-placeholders`,
       );
       qc.invalidateQueries({ queryKey: ["case_material_lines", caseId] });
       qc.invalidateQueries({ queryKey: ["case", caseId] });
