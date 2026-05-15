@@ -594,6 +594,7 @@ export type Database = {
       lookup_material_articles: {
         Args: { p_article_numbers: string[] }
         Returns: {
+          article_id: string
           article_number: string
           category_code: string
           category_id: string
@@ -603,6 +604,10 @@ export type Database = {
           source: string
           unit: string
         }[]
+      }
+      mark_case_as_material_dirty: {
+        Args: { p_case_id: string }
+        Returns: undefined
       }
       move_case_material_line_to_category: {
         Args: { p_case_id: string; p_category_id: string; p_line_id: string }

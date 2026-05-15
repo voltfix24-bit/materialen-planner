@@ -1208,7 +1208,7 @@ function BulkAddDialog({
         const hit = lookupMap.get(p.artno);
         if (hit && hit.found && (hit.source === "articles" || hit.source === "both" || hit.source === "liander")) {
           found.push({
-            article_id: null, // RPC doesn't return id; safe — article_id is optional snapshot link
+            article_id: hit.article_id ?? null,
             article_number: hit.article_number,
             description: hit.description,
             unit: hit.unit,
