@@ -273,9 +273,16 @@ function ImportTemplateDialog({
       if (!res?.success) {
         throw new Error(`Import geblokkeerd: ${res?.error ?? "onbekende fout"}`);
       }
+      const unmapped = Number(res.unmapped_category_count ?? 0);
       toast.success(
-        `Template geïmporteerd: ${res.total_lines} regels (${res.article_lines_count} artikelen, ${res.formula_lines_count} formules)`,
+        `Template geïmporteerd: ${res.total_lines} regels · ${res.article_lines_count} artikelen · ${res.section_headers_count ?? 0} headers · ${res.formula_lines_count} formules · ${res.warning_count ?? 0} waarschuwingen · ${unmapped} niet-gematchte categorieën`,
       );
+      if (unmapped > 0) {
+        toast.warning(
+          `Let op: ${unmapped} template-regels konden niet aan een categorie worden gekoppeld. Controleer de categorie-mapping (categories.excel_template_id).`,
+          { duration: 8000 },
+        );
+      }
       onImported(res.template_id as string);
     } catch (e: any) {
       setError(e.message ?? "Import mislukt");
