@@ -47,6 +47,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { ApplyTemplateButton } from "./ApplyTemplateDialog";
 
 const PAGE_SIZE = 25;
 
@@ -96,6 +97,11 @@ type Line = {
   liander_status: LianderStatus;
   liander_description: string | null;
   liander_unit: string | null;
+  template_line_id: string | null;
+  excel_row_number: number | null;
+  formula_source_text: string | null;
+  formula_status: string | null;
+  source_template_id: string | null;
 };
 
 type Category = {
@@ -355,6 +361,7 @@ export function MaterialEditor({ caseId }: { caseId: string }) {
         <Button variant="outline" onClick={() => setBulkOpen(true)}>
           <ListPlus className="h-4 w-4" /> Meerdere artikelen
         </Button>
+        <ApplyTemplateButton caseId={caseId} />
         <Button
           variant="ghost"
           size="sm"
@@ -665,6 +672,20 @@ function LineRow({
         <div className="flex flex-col gap-1">
           <SourceBadge source={l.source_rule} />
           <LianderBadge status={l.liander_status} />
+          {l.formula_status === "stored_not_active" && (
+            <Badge
+              variant="outline"
+              className="border-amber-300 bg-amber-50 text-[10px] text-amber-900"
+              title={l.formula_source_text ?? "Formule opgeslagen, nog niet automatisch berekend"}
+            >
+              Formule (opgeslagen)
+            </Badge>
+          )}
+          {l.excel_row_number && (
+            <span className="text-[10px] text-slate-400" title="Bron: Excel-rij">
+              rij {l.excel_row_number}
+            </span>
+          )}
         </div>
       </td>
       <td className="px-2 py-1.5 text-right">
@@ -694,6 +715,7 @@ function LineRow({
 
 function SourceBadge({ source }: { source: string | null }) {
   const s = (source ?? "").toLowerCase();
+  if (s === "template") return <Badge className="bg-indigo-600 text-[10px] hover:bg-indigo-600">Template</Badge>;
   if (s === "liander") return <Badge variant="outline" className="text-[10px]">Liander</Badge>;
   if (s === "articles") return <Badge variant="outline" className="text-[10px]">Artikelbestand</Badge>;
   if (s === "manual" || s === "manual_add")

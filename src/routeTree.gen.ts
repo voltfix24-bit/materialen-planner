@@ -9,12 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TemplatesRouteImport } from './routes/templates'
 import { Route as LianderRouteImport } from './routes/liander'
 import { Route as ArticlesRouteImport } from './routes/articles'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CasesNewRouteImport } from './routes/cases.new'
 import { Route as CasesCaseIdRouteImport } from './routes/cases.$caseId'
 
+const TemplatesRoute = TemplatesRouteImport.update({
+  id: '/templates',
+  path: '/templates',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LianderRoute = LianderRouteImport.update({
   id: '/liander',
   path: '/liander',
@@ -45,6 +51,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/articles': typeof ArticlesRoute
   '/liander': typeof LianderRoute
+  '/templates': typeof TemplatesRoute
   '/cases/$caseId': typeof CasesCaseIdRoute
   '/cases/new': typeof CasesNewRoute
 }
@@ -52,6 +59,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/articles': typeof ArticlesRoute
   '/liander': typeof LianderRoute
+  '/templates': typeof TemplatesRoute
   '/cases/$caseId': typeof CasesCaseIdRoute
   '/cases/new': typeof CasesNewRoute
 }
@@ -60,19 +68,33 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/articles': typeof ArticlesRoute
   '/liander': typeof LianderRoute
+  '/templates': typeof TemplatesRoute
   '/cases/$caseId': typeof CasesCaseIdRoute
   '/cases/new': typeof CasesNewRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/articles' | '/liander' | '/cases/$caseId' | '/cases/new'
+  fullPaths:
+    | '/'
+    | '/articles'
+    | '/liander'
+    | '/templates'
+    | '/cases/$caseId'
+    | '/cases/new'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/articles' | '/liander' | '/cases/$caseId' | '/cases/new'
+  to:
+    | '/'
+    | '/articles'
+    | '/liander'
+    | '/templates'
+    | '/cases/$caseId'
+    | '/cases/new'
   id:
     | '__root__'
     | '/'
     | '/articles'
     | '/liander'
+    | '/templates'
     | '/cases/$caseId'
     | '/cases/new'
   fileRoutesById: FileRoutesById
@@ -81,12 +103,20 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ArticlesRoute: typeof ArticlesRoute
   LianderRoute: typeof LianderRoute
+  TemplatesRoute: typeof TemplatesRoute
   CasesCaseIdRoute: typeof CasesCaseIdRoute
   CasesNewRoute: typeof CasesNewRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/templates': {
+      id: '/templates'
+      path: '/templates'
+      fullPath: '/templates'
+      preLoaderRoute: typeof TemplatesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/liander': {
       id: '/liander'
       path: '/liander'
@@ -129,6 +159,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ArticlesRoute: ArticlesRoute,
   LianderRoute: LianderRoute,
+  TemplatesRoute: TemplatesRoute,
   CasesCaseIdRoute: CasesCaseIdRoute,
   CasesNewRoute: CasesNewRoute,
 }
