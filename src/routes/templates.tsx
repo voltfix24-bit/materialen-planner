@@ -455,6 +455,11 @@ function TemplatePreviewDialog({ templateId, onClose }: { templateId: string; on
             onChange={(e) => setFilter(e.target.value)}
           />
         </div>
+        {unmappedCount > 0 && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+            {unmappedCount} regels hebben geen categorie-match. Mogelijke oorzaak: Excel category ID ontbreekt of bestaat niet in <code>categories.excel_template_id</code>.
+          </div>
+        )}
         <div className="max-h-[60vh] overflow-auto rounded-md border">
           <Table>
             <TableHeader>
