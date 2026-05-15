@@ -375,6 +375,7 @@ export type Database = {
           active: boolean
           category_code: string | null
           created_at: string
+          excel_template_id: number | null
           id: string
           name: string
           sort_order: number
@@ -384,6 +385,7 @@ export type Database = {
           active?: boolean
           category_code?: string | null
           created_at?: string
+          excel_template_id?: number | null
           id?: string
           name: string
           sort_order?: number
@@ -393,6 +395,7 @@ export type Database = {
           active?: boolean
           category_code?: string | null
           created_at?: string
+          excel_template_id?: number | null
           id?: string
           name?: string
           sort_order?: number
