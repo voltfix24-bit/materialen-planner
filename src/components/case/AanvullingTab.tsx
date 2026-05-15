@@ -347,3 +347,12 @@ function QtyCell({
     />
   );
 }
+
+function MiniStat({ label, value }: { label: string; value: any }) {
+  return (
+    <Card className="p-3">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="mt-1 text-base font-semibold tabular-nums">{value}</div>
+    </Card>
+  );
+}
