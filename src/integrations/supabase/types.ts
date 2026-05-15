@@ -177,6 +177,20 @@ export type Database = {
             referencedRelation: "categories"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "case_material_lines_source_template_id_fkey"
+            columns: ["source_template_id"]
+            isOneToOne: false
+            referencedRelation: "material_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "case_material_lines_template_line_id_fkey"
+            columns: ["template_line_id"]
+            isOneToOne: false
+            referencedRelation: "material_template_lines"
+            referencedColumns: ["id"]
+          },
         ]
       }
       case_order_lines: {
@@ -271,6 +285,13 @@ export type Database = {
           template_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "case_template_applications_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "cases"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "case_template_applications_template_id_fkey"
             columns: ["template_id"]
@@ -646,6 +667,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "material_template_lines_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "material_template_lines_template_id_fkey"
             columns: ["template_id"]
             isOneToOne: false
@@ -820,6 +848,17 @@ export type Database = {
           p_skipped_rows: number
           p_total_rows: number
           p_warnings: Json
+        }
+        Returns: Json
+      }
+      process_material_template_import: {
+        Args: {
+          p_lines: Json
+          p_name: string
+          p_notes?: string
+          p_source_file_name: string
+          p_source_sheet_name: string
+          p_version: string
         }
         Returns: Json
       }

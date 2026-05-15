@@ -35,7 +35,7 @@ export function ApplyTemplateButton({ caseId }: { caseId: string }) {
 function ApplyTemplateDialog({ caseId, onClose }: { caseId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const [templateId, setTemplateId] = useState<string | null>(null);
-  const [mode, setMode] = useState<"append" | "replace_template_lines">("append");
+  const [mode, setMode] = useState<"append_missing" | "replace_template_lines">("append_missing");
 
   const { data: templates = [] } = useQuery({
     queryKey: ["material_templates_active"],
@@ -102,7 +102,10 @@ function ApplyTemplateDialog({ caseId, onClose }: { caseId: string; onClose: () 
     },
     onSuccess: (res) => {
       toast.success(
-        `Template toegepast: ${res?.lines_created_count ?? 0} regels (${res?.formula_lines_count ?? 0} formule-placeholders)`,
+        `Template toegepast: ${res?.lines_created_count ?? 0} nieuw, ` +
+          `${res?.skipped_existing_count ?? 0} bestaand, ` +
+          `${res?.skipped_headers_count ?? 0} headers overgeslagen, ` +
+          `${res?.formula_lines_count ?? 0} formule-placeholders`,
       );
       qc.invalidateQueries({ queryKey: ["case_material_lines", caseId] });
       qc.invalidateQueries({ queryKey: ["case", caseId] });
@@ -159,7 +162,7 @@ function ApplyTemplateDialog({ caseId, onClose }: { caseId: string; onClose: () 
                   <Select value={mode} onValueChange={(v) => setMode(v as any)}>
                     <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="append">Alleen ontbrekende regels toevoegen (append)</SelectItem>
+                      <SelectItem value="append_missing">Alleen ontbrekende template-regels toevoegen</SelectItem>
                       <SelectItem value="replace_template_lines">
                         Bestaande template-regels verwijderen en opnieuw toepassen
                       </SelectItem>
