@@ -762,6 +762,9 @@ export type Database = {
           charge_or_haspel_number: string
           created_at: string
           description: string
+          excel_row_number: number
+          formula_source_text: string
+          formula_status: string
           id: string
           is_auto_generated: boolean
           is_manual: boolean
@@ -773,6 +776,8 @@ export type Database = {
           return_quantity: number
           sort_order: number
           source_rule: string
+          source_template_id: string
+          template_line_id: string
           total_quantity: number
           unit: string
           updated_at: string
