@@ -462,6 +462,19 @@ function LianderPage() {
               ))}
             </SelectContent>
           </Select>
+          <Button
+            type="button"
+            variant={changedOnly ? "default" : "outline"}
+            onClick={() => setChangedOnly((v) => !v)}
+            disabled={!lastCompletedId}
+            title={
+              lastCompletedId
+                ? "Toon alleen artikelen die door de laatste succesvolle import zijn aangeraakt"
+                : "Geen succesvolle import beschikbaar"
+            }
+          >
+            Gewijzigd in laatste import
+          </Button>
         </div>
       </Card>
 
