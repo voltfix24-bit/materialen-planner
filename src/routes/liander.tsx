@@ -20,7 +20,15 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Upload, Search, AlertTriangle, CheckCircle2, FileSpreadsheet, Loader2 } from "lucide-react";
+import {
+  Upload,
+  Search,
+  AlertTriangle,
+  CheckCircle2,
+  FileSpreadsheet,
+  Loader2,
+  XCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 import { parseLianderFile, type ParseResult } from "@/lib/liander-parser";
 
@@ -42,9 +50,11 @@ function LianderPage() {
   const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [activeFilter, setActiveFilter] = useState("all");
+  const [importFilter, setImportFilter] = useState("all");
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [parsing, setParsing] = useState(false);
   const [committing, setCommitting] = useState(false);
+  const [detailImport, setDetailImport] = useState<any | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { data: items = [], isLoading } = useQuery({
@@ -52,9 +62,11 @@ function LianderPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("liander_assortment_items")
-        .select("*")
+        .select(
+          "*, liander_assortment_imports!liander_assortment_items_import_id_fkey(file_name, import_date)",
+        )
         .order("article_number")
-        .limit(2000);
+        .limit(5000);
       if (error) throw error;
       return data ?? [];
     },
@@ -73,27 +85,40 @@ function LianderPage() {
     },
   });
 
+  const lastCompleted = useMemo(
+    () => (imports as any[]).find((i) => i.status === "completed"),
+    [imports],
+  );
+  const lastAttempt = (imports as any[])[0];
+
   const stats = useMemo(() => {
     const active = items.filter((i: any) => i.active).length;
     const inactive = items.length - active;
-    const last = imports[0] as any | undefined;
     return {
       active,
       inactive,
-      last_date: last?.import_date,
-      last_file: last?.file_name,
-      last_new: last?.new_items_count ?? 0,
-      last_updated: last?.updated_items_count ?? 0,
-      last_inactive: last?.inactive_items_count ?? 0,
+      last_date: lastCompleted?.import_date,
+      last_file: lastCompleted?.file_name,
+      last_new: lastCompleted?.new_items_count ?? 0,
+      last_updated: lastCompleted?.updated_items_count ?? 0,
+      last_inactive: lastCompleted?.inactive_items_count ?? 0,
     };
-  }, [items, imports]);
+  }, [items, lastCompleted]);
+
+  const completedImports = useMemo(
+    () => (imports as any[]).filter((i) => i.status === "completed"),
+    [imports],
+  );
 
   const filtered = items.filter((it: any) => {
     if (activeFilter === "active" && !it.active) return false;
     if (activeFilter === "inactive" && it.active) return false;
+    if (importFilter !== "all" && it.import_id !== importFilter) return false;
     if (
       q &&
-      !`${it.article_number} ${it.description ?? ""}`.toLowerCase().includes(q.toLowerCase())
+      !`${it.article_number} ${it.description ?? ""}`
+        .toLowerCase()
+        .includes(q.toLowerCase())
     )
       return false;
     return true;
@@ -103,7 +128,14 @@ function LianderPage() {
     setParsing(true);
     try {
       const parsed = await parseLianderFile(file);
-      // Compute diff against current active items
+
+      if (parsed.rows.length === 0) {
+        toast.error(
+          "Import geblokkeerd: er zijn geen geldige artikelregels gevonden.",
+        );
+        return;
+      }
+
       const { data: existing, error } = await supabase
         .from("liander_assortment_items")
         .select("article_number, active");
@@ -146,120 +178,54 @@ function LianderPage() {
   async function commitImport() {
     if (!preview) return;
     setCommitting(true);
-    const { file, parsed, diff } = preview;
-
-    // 1. Create import row (status=processing)
-    const { data: importRow, error: impErr } = await supabase
-      .from("liander_assortment_imports")
-      .insert({
-        file_name: file.name,
-        imported_by: "system",
-        total_rows: parsed.total_rows,
-        new_items_count: 0,
-        updated_items_count: 0,
-        inactive_items_count: 0,
-        status: "processing",
-        sheet_name: parsed.sheet_name,
-        header_row_index: parsed.header_row_index,
-        skipped_rows_count: parsed.skipped_rows,
-        warnings: parsed.warnings.length ? parsed.warnings : null,
-      })
-      .select()
-      .single();
-    if (impErr || !importRow) {
-      toast.error("Kon import niet starten: " + impErr?.message);
-      setCommitting(false);
-      return;
-    }
+    const { file, parsed } = preview;
 
     try {
-      // 2. Fetch existing rows (id+article_number) to map upserts
-      const { data: existing, error: exErr } = await supabase
-        .from("liander_assortment_items")
-        .select("id, article_number, active");
-      if (exErr) throw exErr;
-      const exMap = new Map<string, { id: string; active: boolean }>(
-        (existing ?? []).map((e: any) => [e.article_number, { id: e.id, active: e.active }]),
+      const { data, error } = await supabase.rpc(
+        "process_liander_assortment_import" as any,
+        {
+          p_file_name: file.name,
+          p_sheet_name: parsed.sheet_name,
+          p_header_row_index: parsed.header_row_index,
+          p_rows: parsed.rows as any,
+          p_warnings: parsed.warnings.length ? (parsed.warnings as any) : null,
+          p_skipped_rows: parsed.skipped_rows,
+          p_total_rows: parsed.total_rows,
+          p_imported_by: "system",
+        },
       );
-      const incomingSet = new Set(parsed.rows.map((r) => r.article_number));
 
-      const inserts: any[] = [];
-      const updates: { id: string; patch: any }[] = [];
-
-      for (const r of parsed.rows) {
-        const ex = exMap.get(r.article_number);
-        const payload = {
-          import_id: importRow.id,
-          article_number: r.article_number,
-          description: r.description,
-          unit: r.unit,
-          customer_quantity_field_name: r.customer_quantity_field_name,
-          active: true,
-          raw_data: r.raw_data,
-        };
-        if (ex) updates.push({ id: ex.id, patch: payload });
-        else inserts.push(payload);
+      if (error) {
+        // DB rolled back — record a failed attempt for visibility
+        await supabase.from("liander_assortment_imports").insert({
+          file_name: file.name,
+          imported_by: "system",
+          total_rows: parsed.total_rows,
+          status: "failed",
+          error_message: error.message,
+          sheet_name: parsed.sheet_name,
+          header_row_index: parsed.header_row_index,
+          skipped_rows_count: parsed.skipped_rows,
+          warnings: parsed.warnings.length ? parsed.warnings : null,
+        });
+        throw error;
       }
 
-      // 3. Insert new (in chunks)
-      const CHUNK = 500;
-      for (let i = 0; i < inserts.length; i += CHUNK) {
-        const slice = inserts.slice(i, i + CHUNK);
-        const { error } = await supabase.from("liander_assortment_items").insert(slice);
-        if (error) throw error;
+      const result = data as any;
+      if (result?.status === "failed") {
+        toast.error(result.error ?? "Import mislukt");
+      } else {
+        toast.success(
+          `Import voltooid: ${result.new_items_count} nieuw, ${result.updated_items_count} bijgewerkt, ${result.inactive_items_count} inactief.`,
+        );
       }
-
-      // 4. Update existing one-by-one (small N typically; fine for this stage)
-      for (const u of updates) {
-        const { error } = await supabase
-          .from("liander_assortment_items")
-          .update(u.patch)
-          .eq("id", u.id);
-        if (error) throw error;
-      }
-
-      // 5. Mark inactive: previously active but not in new import
-      const inactiveIds: string[] = [];
-      for (const [art, ex] of exMap.entries()) {
-        if (ex.active && !incomingSet.has(art)) inactiveIds.push(ex.id);
-      }
-      if (inactiveIds.length > 0) {
-        for (let i = 0; i < inactiveIds.length; i += CHUNK) {
-          const slice = inactiveIds.slice(i, i + CHUNK);
-          const { error } = await supabase
-            .from("liander_assortment_items")
-            .update({ active: false })
-            .in("id", slice);
-          if (error) throw error;
-        }
-      }
-
-      // 6. Finalize import row
-      await supabase
-        .from("liander_assortment_imports")
-        .update({
-          status: "completed",
-          new_items_count: diff.new_count,
-          updated_items_count: diff.update_count,
-          inactive_items_count: inactiveIds.length,
-        })
-        .eq("id", importRow.id);
-
-      toast.success(
-        `Import voltooid: ${diff.new_count} nieuw, ${diff.update_count} bijgewerkt, ${inactiveIds.length} inactief.`,
-      );
       setPreview(null);
-      qc.invalidateQueries({ queryKey: ["liander-items"] });
-      qc.invalidateQueries({ queryKey: ["liander-imports"] });
     } catch (e: any) {
-      await supabase
-        .from("liander_assortment_imports")
-        .update({ status: "failed", error_message: e?.message ?? String(e) })
-        .eq("id", importRow.id);
       toast.error("Import mislukt: " + (e?.message ?? String(e)));
-      qc.invalidateQueries({ queryKey: ["liander-imports"] });
     } finally {
       setCommitting(false);
+      qc.invalidateQueries({ queryKey: ["liander-items"] });
+      qc.invalidateQueries({ queryKey: ["liander-imports"] });
     }
   }
 
@@ -269,7 +235,8 @@ function LianderPage() {
         <div>
           <h1 className="text-2xl font-semibold">Liander Assortimentslijst</h1>
           <p className="text-sm text-slate-500">
-            Maandelijks door Liander aangeleverde lijst — basis voor de Aanvulling-tab in cases.
+            Maandelijks door Liander aangeleverde lijst — basis voor de
+            Aanvulling-tab in cases.
           </p>
         </div>
         <div className="flex gap-2">
@@ -284,30 +251,90 @@ function LianderPage() {
             }}
           />
           <Button onClick={() => fileRef.current?.click()} disabled={parsing}>
-            {parsing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            {parsing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Upload className="h-4 w-4" />
+            )}
             {parsing ? "Inlezen…" : "Nieuwe Liander-lijst importeren"}
           </Button>
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard label="Actieve artikelen" value={stats.active} />
-        <StatCard label="Inactieve artikelen" value={stats.inactive} />
-        <StatCard
-          label="Laatste import"
-          value={stats.last_date ? new Date(stats.last_date).toLocaleString("nl-NL") : "—"}
-          mono
-        />
-        <StatCard label="Laatste bestand" value={stats.last_file ?? "—"} mono />
-        <StatCard label="Nieuw bij laatste import" value={stats.last_new} />
-        <StatCard label="Bijgewerkt bij laatste import" value={stats.last_updated} />
-        <StatCard label="Inactief bij laatste import" value={stats.last_inactive} />
+      {/* Stats — based on last COMPLETED import */}
+      <div>
+        <h2 className="mb-2 text-sm font-semibold text-slate-700">
+          Actieve lijst (laatste succesvolle import)
+        </h2>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <StatCard label="Actieve artikelen" value={stats.active} />
+          <StatCard label="Inactieve artikelen" value={stats.inactive} />
+          <StatCard
+            label="Laatste succesvolle import"
+            value={
+              stats.last_date
+                ? new Date(stats.last_date).toLocaleString("nl-NL")
+                : "—"
+            }
+            mono
+          />
+          <StatCard label="Bestand" value={stats.last_file ?? "—"} mono />
+          <StatCard label="Nieuw" value={stats.last_new} />
+          <StatCard label="Bijgewerkt" value={stats.last_updated} />
+          <StatCard label="Inactief" value={stats.last_inactive} />
+        </div>
       </div>
+
+      {/* Last attempt — separate, only shown if it differs or failed */}
+      {lastAttempt && (
+        <Card
+          className={`p-4 text-sm ${
+            lastAttempt.status === "failed"
+              ? "border-red-200 bg-red-50"
+              : lastAttempt.status === "processing"
+                ? "border-amber-200 bg-amber-50"
+                : "border-slate-200 bg-slate-50"
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {lastAttempt.status === "failed" ? (
+                <XCircle className="h-4 w-4 text-red-600" />
+              ) : lastAttempt.status === "completed" ? (
+                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+              ) : (
+                <Loader2 className="h-4 w-4 animate-spin text-amber-600" />
+              )}
+              <span className="font-medium">Laatste importpoging:</span>
+              <span className="font-mono text-xs">{lastAttempt.file_name}</span>
+              <span className="text-xs text-slate-500">
+                {new Date(lastAttempt.import_date).toLocaleString("nl-NL")}
+              </span>
+              <Badge variant="outline" className="capitalize">
+                {lastAttempt.status}
+              </Badge>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDetailImport(lastAttempt)}
+            >
+              Details
+            </Button>
+          </div>
+          {lastAttempt.error_message && (
+            <div className="mt-2 text-xs text-red-700">
+              {lastAttempt.error_message}
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Importgeschiedenis */}
       <div>
-        <h2 className="mb-3 text-sm font-semibold text-slate-700">Importgeschiedenis</h2>
+        <h2 className="mb-3 text-sm font-semibold text-slate-700">
+          Importgeschiedenis
+        </h2>
         <Card className="overflow-hidden p-0">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
@@ -321,44 +348,50 @@ function LianderPage() {
                 <th className="px-4 py-2 text-right">Inactief</th>
                 <th className="px-4 py-2 text-right">Skipped</th>
                 <th className="px-4 py-2">Status</th>
+                <th className="px-4 py-2 w-20"></th>
               </tr>
             </thead>
             <tbody>
               {imports.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={10} className="px-4 py-8 text-center text-slate-400">
                     Nog geen imports.
                   </td>
                 </tr>
               )}
-              {imports.map((i: any) => (
-                <tr key={i.id} className="border-t align-top">
+              {(imports as any[]).map((i) => (
+                <tr
+                  key={i.id}
+                  className="border-t cursor-pointer hover:bg-slate-50"
+                  onClick={() => setDetailImport(i)}
+                >
                   <td className="px-4 py-2 whitespace-nowrap">
                     {new Date(i.import_date).toLocaleString("nl-NL")}
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">{i.file_name}</td>
                   <td className="px-4 py-2 text-xs">{i.sheet_name ?? "—"}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">{i.total_rows}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">{i.new_items_count}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">{i.updated_items_count}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">{i.inactive_items_count}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">{i.skipped_rows_count ?? 0}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">
+                    {i.total_rows}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums">
+                    {i.new_items_count}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums">
+                    {i.updated_items_count}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums">
+                    {i.inactive_items_count}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums">
+                    {i.skipped_rows_count ?? 0}
+                  </td>
                   <td className="px-4 py-2">
-                    <Badge
-                      variant="outline"
-                      className={
-                        i.status === "completed"
-                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                          : i.status === "failed"
-                            ? "bg-red-50 text-red-700 border-red-200"
-                            : "bg-slate-50 text-slate-600"
-                      }
-                    >
-                      {i.status}
-                    </Badge>
-                    {i.error_message && (
-                      <div className="mt-1 max-w-xs text-xs text-red-600">{i.error_message}</div>
-                    )}
+                    <StatusBadge status={i.status} />
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <Button variant="ghost" size="sm">
+                      Details
+                    </Button>
                   </td>
                 </tr>
               ))}
@@ -367,7 +400,7 @@ function LianderPage() {
         </Card>
       </div>
 
-      {/* Filter + table */}
+      {/* Filters */}
       <Card className="p-4">
         <div className="flex flex-wrap gap-3">
           <div className="relative flex-1 min-w-[260px]">
@@ -389,9 +422,24 @@ function LianderPage() {
               <SelectItem value="inactive">Inactief</SelectItem>
             </SelectContent>
           </Select>
+          <Select value={importFilter} onValueChange={setImportFilter}>
+            <SelectTrigger className="w-[280px]">
+              <SelectValue placeholder="Filter op import" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Alle imports</SelectItem>
+              {completedImports.map((i: any) => (
+                <SelectItem key={i.id} value={i.id}>
+                  {new Date(i.import_date).toLocaleDateString("nl-NL")} —{" "}
+                  {i.file_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </Card>
 
+      {/* Items table */}
       <Card className="overflow-hidden p-0">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
@@ -400,41 +448,68 @@ function LianderPage() {
               <th className="px-4 py-2">Omschrijving</th>
               <th className="px-4 py-2">Eenheid</th>
               <th className="px-4 py-2">Status</th>
+              <th className="px-4 py-2">Laatste import</th>
               <th className="px-4 py-2">Laatst gewijzigd</th>
             </tr>
           </thead>
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={5} className="p-10 text-center text-slate-400">Laden…</td>
+                <td colSpan={6} className="p-10 text-center text-slate-400">
+                  Laden…
+                </td>
               </tr>
             )}
             {!isLoading && filtered.length === 0 && (
               <tr>
-                <td colSpan={5} className="p-10 text-center text-slate-400">
+                <td colSpan={6} className="p-10 text-center text-slate-400">
                   Geen artikelen — importeer eerst een Liander-lijst.
                 </td>
               </tr>
             )}
-            {filtered.map((it: any) => (
-              <tr key={it.id} className="border-t">
-                <td className="px-4 py-2 font-mono text-xs">{it.article_number}</td>
-                <td className="px-4 py-2">{it.description}</td>
-                <td className="px-4 py-2 text-slate-500">{it.unit}</td>
-                <td className="px-4 py-2">
-                  {it.active ? (
-                    <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">
-                      Actief
-                    </Badge>
-                  ) : (
-                    <Badge variant="secondary" className="bg-slate-200">Inactief</Badge>
-                  )}
-                </td>
-                <td className="px-4 py-2 text-xs text-slate-500">
-                  {it.updated_at ? new Date(it.updated_at).toLocaleString("nl-NL") : "—"}
-                </td>
-              </tr>
-            ))}
+            {filtered.map((it: any) => {
+              const imp = it.liander_assortment_imports;
+              return (
+                <tr key={it.id} className="border-t">
+                  <td className="px-4 py-2 font-mono text-xs">
+                    {it.article_number}
+                  </td>
+                  <td className="px-4 py-2">{it.description}</td>
+                  <td className="px-4 py-2 text-slate-500">{it.unit}</td>
+                  <td className="px-4 py-2">
+                    {it.active ? (
+                      <Badge
+                        variant="secondary"
+                        className="bg-emerald-100 text-emerald-700"
+                      >
+                        Actief
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary" className="bg-slate-200">
+                        Inactief
+                      </Badge>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-xs">
+                    {imp ? (
+                      <>
+                        <div className="font-mono">{imp.file_name}</div>
+                        <div className="text-slate-500">
+                          {new Date(imp.import_date).toLocaleDateString("nl-NL")}
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-slate-500">
+                    {it.updated_at
+                      ? new Date(it.updated_at).toLocaleString("nl-NL")
+                      : "—"}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </Card>
@@ -452,14 +527,19 @@ function LianderPage() {
               <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                 <Info label="Bestand" value={preview.file.name} mono />
                 <Info label="Tabblad" value={preview.parsed.sheet_name} mono />
-                <Info label="Header-rij" value={`rij ${preview.parsed.header_row_index + 1}`} />
+                <Info
+                  label="Header-rij"
+                  value={`rij ${preview.parsed.header_row_index + 1}`}
+                />
                 <Info label="Totaal gelezen rijen" value={preview.parsed.total_rows} />
                 <Info label="Geldige artikelregels" value={preview.parsed.rows.length} />
                 <Info label="Overgeslagen rijen" value={preview.parsed.skipped_rows} />
               </div>
 
               <div className="rounded-md border bg-slate-50 p-3 text-xs">
-                <div className="mb-1 font-semibold text-slate-700">Kolommapping</div>
+                <div className="mb-1 font-semibold text-slate-700">
+                  Kolommapping
+                </div>
                 <div className="grid grid-cols-2 gap-1 font-mono">
                   <span>article_number ←</span>
                   <span>{preview.parsed.column_map.article_number}</span>
@@ -468,7 +548,9 @@ function LianderPage() {
                   <span>unit ←</span>
                   <span>{preview.parsed.column_map.unit ?? "—"}</span>
                   <span>customer_quantity ←</span>
-                  <span>{preview.parsed.column_map.customer_quantity ?? "—"}</span>
+                  <span>
+                    {preview.parsed.column_map.customer_quantity ?? "—"}
+                  </span>
                 </div>
               </div>
 
@@ -484,7 +566,9 @@ function LianderPage() {
                     <AlertTriangle className="h-3.5 w-3.5" /> Waarschuwingen
                   </div>
                   <ul className="list-disc pl-4 space-y-0.5">
-                    {preview.parsed.warnings.map((w, i) => (<li key={i}>{w}</li>))}
+                    {preview.parsed.warnings.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
                   </ul>
                 </div>
               )}
@@ -503,7 +587,11 @@ function LianderPage() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPreview(null)} disabled={committing}>
+            <Button
+              variant="outline"
+              onClick={() => setPreview(null)}
+              disabled={committing}
+            >
               Annuleren
             </Button>
             <Button onClick={commitImport} disabled={committing || !preview}>
@@ -517,7 +605,81 @@ function LianderPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Import detail dialog */}
+      <Dialog open={!!detailImport} onOpenChange={(o) => !o && setDetailImport(null)}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Importdetails</DialogTitle>
+          </DialogHeader>
+          {detailImport && (
+            <div className="space-y-3 text-sm">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                <Info label="Bestand" value={detailImport.file_name} mono />
+                <Info
+                  label="Datum"
+                  value={new Date(detailImport.import_date).toLocaleString("nl-NL")}
+                />
+                <Info label="Status" value={<StatusBadge status={detailImport.status} />} />
+                <Info label="Imported by" value={detailImport.imported_by ?? "—"} />
+                <Info label="Sheet" value={detailImport.sheet_name ?? "—"} mono />
+                <Info
+                  label="Header-rij"
+                  value={
+                    detailImport.header_row_index != null
+                      ? `rij ${detailImport.header_row_index + 1}`
+                      : "—"
+                  }
+                />
+                <Info label="Totaal rijen" value={detailImport.total_rows} />
+                <Info label="Skipped" value={detailImport.skipped_rows_count ?? 0} />
+                <Info label="Nieuw" value={detailImport.new_items_count} />
+                <Info label="Bijgewerkt" value={detailImport.updated_items_count} />
+                <Info label="Inactief" value={detailImport.inactive_items_count} />
+              </div>
+
+              {detailImport.error_message && (
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                  <div className="mb-1 font-semibold">Foutmelding</div>
+                  <div>{detailImport.error_message}</div>
+                </div>
+              )}
+
+              {Array.isArray(detailImport.warnings) &&
+                detailImport.warnings.length > 0 && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                    <div className="mb-1 font-semibold">Waarschuwingen</div>
+                    <ul className="list-disc pl-4 space-y-0.5">
+                      {detailImport.warnings.map((w: string, i: number) => (
+                        <li key={i}>{w}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDetailImport(null)}>
+              Sluiten
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const cls =
+    status === "completed"
+      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+      : status === "failed"
+        ? "bg-red-50 text-red-700 border-red-200"
+        : "bg-slate-50 text-slate-600";
+  return (
+    <Badge variant="outline" className={cls}>
+      {status}
+    </Badge>
   );
 }
 
@@ -541,7 +703,15 @@ function Info({ label, value, mono }: { label: string; value: any; mono?: boolea
   );
 }
 
-function DiffStat({ label, value, tone }: { label: string; value: number; tone: "emerald" | "sky" | "amber" }) {
+function DiffStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "emerald" | "sky" | "amber";
+}) {
   const colors = {
     emerald: "border-emerald-200 bg-emerald-50 text-emerald-800",
     sky: "border-sky-200 bg-sky-50 text-sky-800",

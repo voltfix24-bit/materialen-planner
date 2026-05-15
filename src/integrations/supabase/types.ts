@@ -555,7 +555,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      process_liander_assortment_import: {
+        Args: {
+          p_file_name: string
+          p_header_row_index: number
+          p_imported_by?: string
+          p_rows: Json
+          p_sheet_name: string
+          p_skipped_rows: number
+          p_total_rows: number
+          p_warnings: Json
+        }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never
