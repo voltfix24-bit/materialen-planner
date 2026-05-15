@@ -111,10 +111,13 @@ function LianderPage() {
     [imports],
   );
 
+  const lastCompletedId = lastCompleted?.id ?? null;
+
   const filtered = items.filter((it: any) => {
     if (activeFilter === "active" && !it.active) return false;
     if (activeFilter === "inactive" && it.active) return false;
     if (importFilter !== "all" && it.import_id !== importFilter) return false;
+    if (changedOnly && (!lastCompletedId || it.import_id !== lastCompletedId)) return false;
     if (
       q &&
       !`${it.article_number} ${it.description ?? ""}`
