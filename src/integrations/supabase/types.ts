@@ -568,6 +568,7 @@ export type Database = {
         }
         Returns: Json
       }
+      rebuild_case_order_lines: { Args: { p_case_id: string }; Returns: Json }
     }
     Enums: {
       [_ in never]: never

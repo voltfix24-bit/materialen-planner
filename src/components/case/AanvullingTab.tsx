@@ -78,56 +78,41 @@ export function AanvullingTab({
     },
   });
 
+  const [lastRebuild, setLastRebuild] = useState<{
+    matched_count: number;
+    unmatched_count: number;
+    total_source_lines: number;
+    unmatched_articles: string[];
+  } | null>(null);
+
   const rebuild = useMutation({
     mutationFn: async () => {
-      const { data: material, error: mErr } = await supabase
-        .from("case_material_lines")
-        .select("article_number, description, unit, total_quantity")
-        .eq("case_id", caseId)
-        .gt("total_quantity", 0);
-      if (mErr) throw mErr;
-      const { data: liander, error: lErr } = await supabase
-        .from("liander_assortment_items")
-        .select("id, article_number")
-        .eq("active", true);
-      if (lErr) throw lErr;
-      const lianderMap = new Map(
-        (liander ?? []).map((l: any) => [l.article_number, l.id]),
+      const { data, error } = await supabase.rpc(
+        "rebuild_case_order_lines" as any,
+        { p_case_id: caseId },
       );
-      // Aggregate per article_number for matched only
-      const agg = new Map<
-        string,
-        { description: string | null; unit: string | null; qty: number }
-      >();
-      for (const m of material ?? []) {
-        if (!m.article_number || !lianderMap.has(m.article_number)) continue;
-        const cur = agg.get(m.article_number);
-        const qty = (cur?.qty ?? 0) + (Number(m.total_quantity) || 0);
-        agg.set(m.article_number, {
-          description: m.description ?? cur?.description ?? null,
-          unit: m.unit ?? cur?.unit ?? null,
-          qty,
-        });
-      }
-      await supabase.from("case_order_lines").delete().eq("case_id", caseId);
-      const insert = [...agg.entries()].map(([article, v]) => ({
-        case_id: caseId,
-        article_number: article,
-        description: v.description,
-        unit: v.unit,
-        customer_quantity: v.qty,
-        matched_liander_assortment_item_id: lianderMap.get(article) ?? null,
-        match_status: "matched",
-      }));
-      if (insert.length > 0) {
-        const { error } = await supabase.from("case_order_lines").insert(insert);
-        if (error) throw error;
-      }
+      if (error) throw error;
+      return data as any;
     },
-    onSuccess: () => {
+    onSuccess: (result: any) => {
+      setLastRebuild({
+        matched_count: result?.matched_count ?? 0,
+        unmatched_count: result?.unmatched_count ?? 0,
+        total_source_lines: result?.total_source_lines ?? 0,
+        unmatched_articles: Array.isArray(result?.unmatched_articles)
+          ? result.unmatched_articles
+          : [],
+      });
       qc.invalidateQueries({ queryKey: ["aanvulling", caseId] });
       qc.invalidateQueries({ queryKey: ["aanvulling-unmatched", caseId] });
-      toast.success("Aanvulling opnieuw opgebouwd");
+      toast.success(
+        `Aanvulling opnieuw opgebouwd: ${result?.matched_count ?? 0} gematcht, ${
+          result?.unmatched_count ?? 0
+        } niet gematcht`,
+      );
+    },
+    onError: (e: any) => {
+      toast.error("Rebuild mislukt: " + (e?.message ?? String(e)));
     },
   });
 
@@ -193,10 +178,31 @@ export function AanvullingTab({
           Bestelvoorbereiding richting Liander. Alleen artikelen die voorkomen in
           de actieve Liander Assortimentslijst worden hier opgenomen.
         </p>
-        <Button variant="outline" onClick={() => rebuild.mutate()}>
-          <RefreshCw className="h-4 w-4" /> Aanvulling opnieuw opbouwen
+        <Button
+          variant="outline"
+          onClick={() => rebuild.mutate()}
+          disabled={rebuild.isPending}
+        >
+          <RefreshCw
+            className={`h-4 w-4 ${rebuild.isPending ? "animate-spin" : ""}`}
+          />{" "}
+          Aanvulling opnieuw opbouwen
         </Button>
       </div>
+
+      {lastRebuild && (
+        <Card className="border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
+          Laatste rebuild: {lastRebuild.matched_count} gematchte bestelregel(s)
+          uit {lastRebuild.total_source_lines} materiaalregel(s) ·{" "}
+          {lastRebuild.unmatched_count} niet gematcht
+          {lastRebuild.unmatched_articles.length > 0 && (
+            <span className="ml-1 font-mono text-sky-800">
+              ({lastRebuild.unmatched_articles.slice(0, 8).join(", ")}
+              {lastRebuild.unmatched_articles.length > 8 ? " …" : ""})
+            </span>
+          )}
+        </Card>
+      )}
 
       <Card className="overflow-hidden p-0">
         <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-2 text-xs text-slate-500">
