@@ -51,6 +51,7 @@ function LianderPage() {
   const [q, setQ] = useState("");
   const [activeFilter, setActiveFilter] = useState("all");
   const [importFilter, setImportFilter] = useState("all");
+  const [changedOnly, setChangedOnly] = useState(false);
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [parsing, setParsing] = useState(false);
   const [committing, setCommitting] = useState(false);
