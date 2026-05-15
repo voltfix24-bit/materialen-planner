@@ -46,10 +46,7 @@ Deno.serve(async (req) => {
             "Vul eerst de verkooporder instellingen in voordat je exporteert.",
           missing,
         }),
-        {
-          status: 422,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
@@ -98,10 +95,7 @@ Deno.serve(async (req) => {
           error:
             "Geen exporteerbare regels: er zijn geen materiaalregels met totaal > 0.",
         }),
-        {
-          status: 422,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 

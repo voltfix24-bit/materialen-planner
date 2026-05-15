@@ -66,9 +66,12 @@ function CaseDetail() {
         { body: { case_id: caseId } },
       );
       if (error) throw error;
-      // data is csv text — also returned as { csv, file_name }
-      const csv = typeof data === "string" ? data : data.csv;
-      const fileName = typeof data === "string" ? `Case ${caseId}.csv` : data.file_name;
+      if (data?.error) {
+        toast.error(data.error, { id: "export" });
+        return;
+      }
+      const csv = data.csv;
+      const fileName = data.file_name ?? `Case ${caseId}.csv`;
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -76,12 +79,15 @@ function CaseDetail() {
       a.download = fileName;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success("CSV gedownload", { id: "export" });
+      toast.success(`CSV gedownload (${data.row_count} regels)`, { id: "export" });
       qc.invalidateQueries({ queryKey: ["case", caseId] });
       qc.invalidateQueries({ queryKey: ["export-logs", caseId] });
+      qc.invalidateQueries({ queryKey: ["verkooporder", caseId] });
       qc.invalidateQueries({ queryKey: ["cases"] });
     } catch (e: any) {
-      toast.error("Export mislukt: " + e.message, { id: "export" });
+      toast.error("Export mislukt: " + (e?.message ?? "onbekende fout"), {
+        id: "export",
+      });
     }
   };
 
