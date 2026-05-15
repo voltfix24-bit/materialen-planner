@@ -30,6 +30,30 @@ export function AanvullingTab({
     },
   });
 
+  const { data: lianderInfo } = useQuery({
+    queryKey: ["aanvulling-liander-info"],
+    queryFn: async () => {
+      const [{ count: activeCount }, { data: lastImport }] = await Promise.all([
+        supabase
+          .from("liander_assortment_items")
+          .select("id", { count: "exact", head: true })
+          .eq("active", true),
+        supabase
+          .from("liander_assortment_imports")
+          .select("import_date, file_name, status")
+          .eq("status", "completed")
+          .order("import_date", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+      return {
+        active_count: activeCount ?? 0,
+        last_import_date: (lastImport as any)?.import_date ?? null,
+        last_file: (lastImport as any)?.file_name ?? null,
+      };
+    },
+  });
+
   const { data: unmatched = [] } = useQuery({
     queryKey: ["aanvulling-unmatched", caseId],
     queryFn: async () => {
