@@ -162,7 +162,7 @@ function ApplyTemplateDialog({ caseId, onClose }: { caseId: string; onClose: () 
                   <Select value={mode} onValueChange={(v) => setMode(v as any)}>
                     <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="append">Alleen ontbrekende regels toevoegen (append)</SelectItem>
+                      <SelectItem value="append_missing">Alleen ontbrekende template-regels toevoegen</SelectItem>
                       <SelectItem value="replace_template_lines">
                         Bestaande template-regels verwijderen en opnieuw toepassen
                       </SelectItem>
