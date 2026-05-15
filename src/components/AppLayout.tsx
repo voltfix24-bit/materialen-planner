@@ -6,6 +6,7 @@ const nav = [
   { to: "/", label: "Dashboard" },
   { to: "/articles", label: "Artikelbestand" },
   { to: "/liander", label: "Liander Assortiment" },
+  { to: "/templates", label: "Templates" },
 ];
 
 export function AppLayout() {
