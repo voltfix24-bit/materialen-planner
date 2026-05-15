@@ -30,6 +30,30 @@ export function AanvullingTab({
     },
   });
 
+  const { data: lianderInfo } = useQuery({
+    queryKey: ["aanvulling-liander-info"],
+    queryFn: async () => {
+      const [{ count: activeCount }, { data: lastImport }] = await Promise.all([
+        supabase
+          .from("liander_assortment_items")
+          .select("id", { count: "exact", head: true })
+          .eq("active", true),
+        supabase
+          .from("liander_assortment_imports")
+          .select("import_date, file_name, status")
+          .eq("status", "completed")
+          .order("import_date", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+      return {
+        active_count: activeCount ?? 0,
+        last_import_date: (lastImport as any)?.import_date ?? null,
+        last_file: (lastImport as any)?.file_name ?? null,
+      };
+    },
+  });
+
   const { data: unmatched = [] } = useQuery({
     queryKey: ["aanvulling-unmatched", caseId],
     queryFn: async () => {
@@ -138,6 +162,32 @@ export function AanvullingTab({
 
   return (
     <div className="space-y-4">
+      {lianderInfo && lianderInfo.active_count === 0 && (
+        <Card className="border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4" />
+            <div>
+              Er is nog geen Liander Assortimentslijst geïmporteerd. Importeer eerst
+              een actuele lijst voordat je Aanvulling kunt opbouwen.
+            </div>
+          </div>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <MiniStat
+          label="Actieve Liander-lijst (laatste import)"
+          value={
+            lianderInfo?.last_import_date
+              ? new Date(lianderInfo.last_import_date).toLocaleDateString("nl-NL")
+              : "—"
+          }
+        />
+        <MiniStat label="Actieve Liander-artikelen" value={lianderInfo?.active_count ?? 0} />
+        <MiniStat label="Gematchte bestelregels" value={rows.length} />
+        <MiniStat label="Niet-gematchte materiaalregels" value={unmatched.length} />
+      </div>
+
       <div className="flex items-center justify-between">
         <p className="text-sm text-slate-500">
           Bestelvoorbereiding richting Liander. Alleen artikelen die voorkomen in
@@ -295,5 +345,14 @@ function QtyCell({
       }}
       className="h-8 text-right tabular-nums"
     />
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: any }) {
+  return (
+    <Card className="p-3">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="mt-1 text-base font-semibold tabular-nums">{value}</div>
+    </Card>
   );
 }

@@ -408,39 +408,54 @@ export type Database = {
       liander_assortment_imports: {
         Row: {
           created_at: string
+          error_message: string | null
           file_name: string | null
+          header_row_index: number | null
           id: string
           import_date: string
           imported_by: string | null
           inactive_items_count: number
           new_items_count: number
+          sheet_name: string | null
+          skipped_rows_count: number
           status: string
           total_rows: number
           updated_items_count: number
+          warnings: Json | null
         }
         Insert: {
           created_at?: string
+          error_message?: string | null
           file_name?: string | null
+          header_row_index?: number | null
           id?: string
           import_date?: string
           imported_by?: string | null
           inactive_items_count?: number
           new_items_count?: number
+          sheet_name?: string | null
+          skipped_rows_count?: number
           status?: string
           total_rows?: number
           updated_items_count?: number
+          warnings?: Json | null
         }
         Update: {
           created_at?: string
+          error_message?: string | null
           file_name?: string | null
+          header_row_index?: number | null
           id?: string
           import_date?: string
           imported_by?: string | null
           inactive_items_count?: number
           new_items_count?: number
+          sheet_name?: string | null
+          skipped_rows_count?: number
           status?: string
           total_rows?: number
           updated_items_count?: number
+          warnings?: Json | null
         }
         Relationships: []
       }
