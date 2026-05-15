@@ -58,18 +58,32 @@ function CaseDetail() {
     },
   });
 
+  const settingsMissing =
+    !caseRow?.so_number ||
+    !caseRow?.so_customernumber ||
+    !caseRow?.so_project;
+
   const exportCsv = async () => {
+    if (settingsMissing) {
+      toast.error(
+        "Vul eerst so_number, so_customernumber en so_project in op het tabblad Overzicht.",
+      );
+      setTab("overview");
+      return;
+    }
     toast.loading("CSV genereren…", { id: "export" });
     try {
       const { data, error } = await supabase.functions.invoke(
         "export-verkooporder-csv",
         { body: { case_id: caseId } },
       );
-      if (error) throw error;
+      // Edge function returns 400 with a JSON body; supabase-js sets `error`
+      // but the parsed body still arrives in `data`. Prefer the server message.
       if (data?.error) {
         toast.error(data.error, { id: "export" });
         return;
       }
+      if (error) throw error;
       const csv = data.csv;
       const fileName = data.file_name ?? `Case ${caseId}.csv`;
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
