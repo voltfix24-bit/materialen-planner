@@ -178,10 +178,31 @@ export function AanvullingTab({
           Bestelvoorbereiding richting Liander. Alleen artikelen die voorkomen in
           de actieve Liander Assortimentslijst worden hier opgenomen.
         </p>
-        <Button variant="outline" onClick={() => rebuild.mutate()}>
-          <RefreshCw className="h-4 w-4" /> Aanvulling opnieuw opbouwen
+        <Button
+          variant="outline"
+          onClick={() => rebuild.mutate()}
+          disabled={rebuild.isPending}
+        >
+          <RefreshCw
+            className={`h-4 w-4 ${rebuild.isPending ? "animate-spin" : ""}`}
+          />{" "}
+          Aanvulling opnieuw opbouwen
         </Button>
       </div>
+
+      {lastRebuild && (
+        <Card className="border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
+          Laatste rebuild: {lastRebuild.matched_count} gematchte bestelregel(s)
+          uit {lastRebuild.total_source_lines} materiaalregel(s) ·{" "}
+          {lastRebuild.unmatched_count} niet gematcht
+          {lastRebuild.unmatched_articles.length > 0 && (
+            <span className="ml-1 font-mono text-sky-800">
+              ({lastRebuild.unmatched_articles.slice(0, 8).join(", ")}
+              {lastRebuild.unmatched_articles.length > 8 ? " …" : ""})
+            </span>
+          )}
+        </Card>
+      )}
 
       <Card className="overflow-hidden p-0">
         <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-2 text-xs text-slate-500">
