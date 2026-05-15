@@ -273,9 +273,16 @@ function ImportTemplateDialog({
       if (!res?.success) {
         throw new Error(`Import geblokkeerd: ${res?.error ?? "onbekende fout"}`);
       }
+      const unmapped = Number(res.unmapped_category_count ?? 0);
       toast.success(
-        `Template geïmporteerd: ${res.total_lines} regels (${res.article_lines_count} artikelen, ${res.formula_lines_count} formules)`,
+        `Template geïmporteerd: ${res.total_lines} regels · ${res.article_lines_count} artikelen · ${res.section_headers_count ?? 0} headers · ${res.formula_lines_count} formules · ${res.warning_count ?? 0} waarschuwingen · ${unmapped} niet-gematchte categorieën`,
       );
+      if (unmapped > 0) {
+        toast.warning(
+          `Let op: ${unmapped} template-regels konden niet aan een categorie worden gekoppeld. Controleer de categorie-mapping (categories.excel_template_id).`,
+          { duration: 8000 },
+        );
+      }
       onImported(res.template_id as string);
     } catch (e: any) {
       setError(e.message ?? "Import mislukt");
@@ -421,6 +428,16 @@ function TemplatePreviewDialog({ templateId, onClose }: { templateId: string; on
       (l.description ?? "").toLowerCase().includes(q));
   }, [lines, filter]);
 
+  const unmappedCount = useMemo(
+    () => lines.filter((l: any) =>
+      l.category_id == null
+      && l.excel_category_id != null
+      && !l.is_section_header
+      && !l.is_blank_or_separator
+    ).length,
+    [lines],
+  );
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-5xl">
@@ -438,6 +455,11 @@ function TemplatePreviewDialog({ templateId, onClose }: { templateId: string; on
             onChange={(e) => setFilter(e.target.value)}
           />
         </div>
+        {unmappedCount > 0 && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+            {unmappedCount} regels hebben geen categorie-match. Mogelijke oorzaak: Excel category ID ontbreekt of bestaat niet in <code>categories.excel_template_id</code>.
+          </div>
+        )}
         <div className="max-h-[60vh] overflow-auto rounded-md border">
           <Table>
             <TableHeader>
@@ -463,7 +485,12 @@ function TemplatePreviewDialog({ templateId, onClose }: { templateId: string; on
                   <TableCell className="text-xs">{l.description ?? ""}</TableCell>
                   <TableCell className="text-right text-xs">{l.default_quantity ?? ""}</TableCell>
                   <TableCell className="text-xs">{l.unit ?? ""}</TableCell>
-                  <TableCell className="text-xs">{l.excel_category_id ?? ""}</TableCell>
+                  <TableCell className="text-xs">
+                    {l.excel_category_id ?? ""}
+                    {l.category_id == null && l.excel_category_id != null && !l.is_section_header && !l.is_blank_or_separator && (
+                      <Badge variant="outline" className="ml-1 border-amber-400 text-amber-700">Cat niet gematcht</Badge>
+                    )}
+                  </TableCell>
                   <TableCell className="text-xs">
                     <Badge variant="secondary">{l.source_type ?? "—"}</Badge>
                   </TableCell>
