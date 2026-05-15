@@ -226,67 +226,57 @@ function ImportTemplateDialog({
 
   async function onConfirm() {
     if (!parsed || !file) return;
+    if (!name.trim()) {
+      setError("Naam is verplicht.");
+      return;
+    }
+    if (parsed.counts.article_lines === 0) {
+      setError("Geen artikelregels in het bestand — import geblokkeerd.");
+      return;
+    }
     setBusy(true);
     try {
-      // Load categories for excel_category_id mapping
-      const { data: cats } = await supabase.from("categories").select("id,category_code,sort_order");
-      const catByExcelId = new Map<number, { id: string; code: string | null }>();
-      for (const c of cats ?? []) {
-        if (typeof c.sort_order === "number") {
-          catByExcelId.set(Math.round(c.sort_order / 10), { id: c.id, code: c.category_code });
-        }
+      const payload = parsed.lines.map((l) => ({
+        excel_row_number: l.excel_row_number,
+        article_number: l.article_number,
+        description: l.description,
+        sort_order: l.sort_order,
+        default_quantity: l.default_quantity,
+        unit: l.unit,
+        default_used_quantity: l.default_used_quantity,
+        default_return_quantity: l.default_return_quantity,
+        default_total_quantity: l.default_total_quantity,
+        note: l.note,
+        excel_category_id: l.excel_category_id,
+        is_section_header: l.is_section_header,
+        is_blank_or_separator: l.is_blank_or_separator,
+        is_formula_quantity: l.is_formula_quantity,
+        quantity_formula_text: l.quantity_formula_text,
+        total_formula_text: l.total_formula_text,
+        formula_references: l.formula_references,
+        source_type: l.source_type,
+      }));
+
+      const { data, error: rpcErr } = await supabase.rpc(
+        "process_material_template_import",
+        {
+          p_name: name.trim(),
+          p_version: version.trim() || null,
+          p_source_file_name: file.name,
+          p_source_sheet_name: parsed.sheet_name,
+          p_lines: payload as any,
+          p_notes: null,
+        },
+      );
+      if (rpcErr) throw rpcErr;
+      const res = data as any;
+      if (!res?.success) {
+        throw new Error(`Import geblokkeerd: ${res?.error ?? "onbekende fout"}`);
       }
-
-      const { data: tpl, error: tplErr } = await supabase
-        .from("material_templates")
-        .insert({
-          name: name || file.name,
-          version: version || null,
-          source_file_name: file.name,
-          source_sheet_name: parsed.sheet_name,
-          active: true,
-        })
-        .select("id")
-        .single();
-      if (tplErr) throw tplErr;
-      const templateId = tpl!.id as string;
-
-      const payload = parsed.lines.map((l) => {
-        const cat = l.excel_category_id != null ? catByExcelId.get(l.excel_category_id) ?? null : null;
-        return {
-          template_id: templateId,
-          excel_row_number: l.excel_row_number,
-          article_number: l.article_number,
-          description: l.description,
-          sort_order: l.sort_order,
-          default_quantity: l.default_quantity,
-          unit: l.unit,
-          default_used_quantity: l.default_used_quantity,
-          default_return_quantity: l.default_return_quantity,
-          default_total_quantity: l.default_total_quantity,
-          note: l.note,
-          category_id: cat?.id ?? null,
-          category_code: cat?.code ?? null,
-          excel_category_id: l.excel_category_id,
-          is_section_header: l.is_section_header,
-          is_blank_or_separator: l.is_blank_or_separator,
-          is_formula_quantity: l.is_formula_quantity,
-          quantity_formula_text: l.quantity_formula_text,
-          total_formula_text: l.total_formula_text,
-          formula_references: l.formula_references,
-          source_type: l.source_type,
-        };
-      });
-
-      // Batch insert in chunks of 200
-      for (let i = 0; i < payload.length; i += 200) {
-        const chunk = payload.slice(i, i + 200);
-        const { error: insErr } = await supabase.from("material_template_lines").insert(chunk);
-        if (insErr) throw insErr;
-      }
-
-      toast.success(`Template geïmporteerd: ${payload.length} regels`);
-      onImported(templateId);
+      toast.success(
+        `Template geïmporteerd: ${res.total_lines} regels (${res.article_lines_count} artikelen, ${res.formula_lines_count} formules)`,
+      );
+      onImported(res.template_id as string);
     } catch (e: any) {
       setError(e.message ?? "Import mislukt");
       toast.error(e.message ?? "Import mislukt");
