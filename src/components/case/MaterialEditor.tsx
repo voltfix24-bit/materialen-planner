@@ -96,6 +96,11 @@ type Line = {
   liander_status: LianderStatus;
   liander_description: string | null;
   liander_unit: string | null;
+  template_line_id: string | null;
+  excel_row_number: number | null;
+  formula_source_text: string | null;
+  formula_status: string | null;
+  source_template_id: string | null;
 };
 
 type Category = {
