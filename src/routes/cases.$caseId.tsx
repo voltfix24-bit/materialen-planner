@@ -114,6 +114,22 @@ function CaseDetail() {
               <Badge className={s.className} variant="secondary">
                 {s.label}
               </Badge>
+              {caseRow.export_stale && (
+                <Badge
+                  variant="secondary"
+                  className="bg-amber-100 text-amber-800"
+                >
+                  Gewijzigd na export
+                </Badge>
+              )}
+              {!caseRow.export_stale && caseRow.last_exported_at && (
+                <Badge
+                  variant="secondary"
+                  className="bg-emerald-100 text-emerald-800"
+                >
+                  Export actueel
+                </Badge>
+              )}
             </div>
             <div className="mt-1 text-sm text-slate-500">
               {caseRow.project_number ? `Project ${caseRow.project_number} · ` : ""}
