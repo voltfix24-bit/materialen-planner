@@ -235,6 +235,7 @@ export type Database = {
           internal_note: string | null
           last_exported_at: string | null
           last_material_change_at: string | null
+          last_verkooporder_rebuild_at: string | null
           project_number: string | null
           so_customernumber: string | null
           so_number: string | null
@@ -256,6 +257,7 @@ export type Database = {
           internal_note?: string | null
           last_exported_at?: string | null
           last_material_change_at?: string | null
+          last_verkooporder_rebuild_at?: string | null
           project_number?: string | null
           so_customernumber?: string | null
           so_number?: string | null
@@ -277,6 +279,7 @@ export type Database = {
           internal_note?: string | null
           last_exported_at?: string | null
           last_material_change_at?: string | null
+          last_verkooporder_rebuild_at?: string | null
           project_number?: string | null
           so_customernumber?: string | null
           so_number?: string | null
@@ -321,6 +324,7 @@ export type Database = {
         Row: {
           case_id: string | null
           created_at: string
+          error_message: string | null
           export_type: string
           exported_at: string
           exported_by: string | null
@@ -332,6 +336,7 @@ export type Database = {
         Insert: {
           case_id?: string | null
           created_at?: string
+          error_message?: string | null
           export_type?: string
           exported_at?: string
           exported_by?: string | null
@@ -343,6 +348,7 @@ export type Database = {
         Update: {
           case_id?: string | null
           created_at?: string
+          error_message?: string | null
           export_type?: string
           exported_at?: string
           exported_by?: string | null
