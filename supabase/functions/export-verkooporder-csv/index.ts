@@ -1,4 +1,4 @@
-// Edge function: export verkooporder as CSV with auto-rebuild
+// Edge function: export verkooporder as CSV with auto-rebuild + safety guards
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -8,26 +8,49 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  try {
-    const { case_id } = await req.json();
-    if (!case_id || typeof case_id !== "string") {
-      return new Response(JSON.stringify({ error: "case_id is required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+
+  let case_id: string | undefined;
+  let intendedFileName: string | null = null;
+
+  const logFailure = async (message: string) => {
+    try {
+      await supabase.from("export_logs").insert({
+        case_id: case_id ?? null,
+        export_type: "verkooporder_csv",
+        file_name: intendedFileName,
+        row_count: 0,
+        status: "failed",
+        error_message: message,
+        exported_by: "system",
       });
+    } catch (_) {
+      // swallow logging failure
+    }
+  };
+
+  try {
+    const body = await req.json();
+    case_id = body?.case_id;
+    if (!case_id || typeof case_id !== "string") {
+      return json({ error: "case_id is required" }, 400);
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
-
-    // 1. Validate case
+    // 1. Validate case + SO settings
     const { data: caseRow, error: caseErr } = await supabase
       .from("cases")
       .select("id, case_number, so_number, so_customernumber, so_project")
@@ -35,36 +58,72 @@ Deno.serve(async (req) => {
       .single();
     if (caseErr) throw caseErr;
 
+    intendedFileName = `Case ${caseRow.case_number ?? case_id}.csv`;
+
     const missing: string[] = [];
     if (!caseRow.so_number) missing.push("so_number");
     if (!caseRow.so_customernumber) missing.push("so_customernumber");
     if (!caseRow.so_project) missing.push("so_project");
     if (missing.length > 0) {
-      return new Response(
-        JSON.stringify({
-          error:
-            "Vul eerst de verkooporder instellingen in voordat je exporteert.",
-          missing,
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      const msg = `Vul eerst de verkooporder instellingen in (${missing.join(", ")}).`;
+      await logFailure(msg);
+      return json({ error: msg, missing }, 400);
     }
 
-    // 2. Rebuild verkooporder_lines from current case_material_lines
+    // 2. Fetch material lines
     const { data: material, error: matErr } = await supabase
       .from("case_material_lines")
-      .select("article_number, total_quantity")
+      .select("id, article_number, description, total_quantity")
       .eq("case_id", case_id);
     if (matErr) throw matErr;
 
+    // 2a. Block: positive total without article_number
+    const orphan = (material ?? []).filter((m: any) => {
+      const n = Number(m.total_quantity);
+      return Number.isFinite(n) && n > 0 && (!m.article_number || String(m.article_number).trim() === "");
+    });
+    if (orphan.length > 0) {
+      const msg = `Export geblokkeerd: ${orphan.length} materiaalregel(s) met hoeveelheid > 0 zonder artikelnummer.`;
+      await logFailure(msg);
+      return json({
+        error: msg,
+        orphan_count: orphan.length,
+        orphan_lines: orphan.map((o: any) => ({
+          id: o.id,
+          description: o.description,
+          total_quantity: o.total_quantity,
+        })),
+      }, 400);
+    }
+
+    // 2b. Block: invalid numeric values
+    const invalid = (material ?? []).filter((m: any) => {
+      if (m.total_quantity == null) return false;
+      const n = Number(m.total_quantity);
+      return !Number.isFinite(n);
+    });
+    if (invalid.length > 0) {
+      const msg = `Export geblokkeerd: ${invalid.length} materiaalregel(s) met ongeldige hoeveelheid.`;
+      await logFailure(msg);
+      return json({ error: msg, invalid_count: invalid.length }, 400);
+    }
+
+    // 3. Aggregate per article_number (only total_quantity > 0)
     const agg = new Map<string, number>();
     for (const m of material ?? []) {
-      const n = Number(m.total_quantity) || 0;
-      if (!m.article_number || n <= 0) continue;
+      const n = Number(m.total_quantity);
+      if (!Number.isFinite(n) || n <= 0) continue;
+      if (!m.article_number) continue;
       agg.set(m.article_number, (agg.get(m.article_number) ?? 0) + n);
     }
 
-    // 3+4. Replace verkooporder_lines
+    if (agg.size === 0) {
+      const msg = "Geen exporteerbare regels: er zijn geen materiaalregels met totaal > 0.";
+      await logFailure(msg);
+      return json({ error: msg }, 400);
+    }
+
+    // 4. Replace verkooporder_lines
     const { error: delErr } = await supabase
       .from("verkooporder_lines")
       .delete()
@@ -82,22 +141,10 @@ Deno.serve(async (req) => {
         so_project: caseRow.so_project,
       }));
 
-    if (insertRows.length > 0) {
-      const { error: insErr } = await supabase
-        .from("verkooporder_lines")
-        .insert(insertRows);
-      if (insErr) throw insErr;
-    }
-
-    if (insertRows.length === 0) {
-      return new Response(
-        JSON.stringify({
-          error:
-            "Geen exporteerbare regels: er zijn geen materiaalregels met totaal > 0.",
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
+    const { error: insErr } = await supabase
+      .from("verkooporder_lines")
+      .insert(insertRows);
+    if (insErr) throw insErr;
 
     // 5. Build CSV
     const headers = [
@@ -114,45 +161,40 @@ Deno.serve(async (req) => {
     const csv =
       headers.join(",") +
       "\n" +
-      insertRows.map((r: any) => headers.map((h) => escape(r[h])).join(",")).join(
-        "\n",
-      ) +
+      insertRows.map((r: any) => headers.map((h) => escape(r[h])).join(",")).join("\n") +
       "\n";
 
-    const fileName = `Case ${caseRow.case_number ?? case_id}.csv`;
-
-    // 6. Log export
+    // 6. Log success
     await supabase.from("export_logs").insert({
       case_id,
       export_type: "verkooporder_csv",
-      file_name: fileName,
+      file_name: intendedFileName,
       row_count: insertRows.length,
       status: "success",
+      exported_by: "system",
     });
 
-    // 7. Update case status + clear stale + last_exported_at
+    // 7. Update case: clear stale, mark exported, set rebuild timestamp
+    const now = new Date().toISOString();
     await supabase
       .from("cases")
       .update({
         status: "geexporteerd",
-        last_exported_at: new Date().toISOString(),
+        last_exported_at: now,
+        last_verkooporder_rebuild_at: now,
         export_stale: false,
       })
       .eq("id", case_id);
 
-    return new Response(
-      JSON.stringify({
-        csv,
-        file_name: fileName,
-        row_count: insertRows.length,
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
-  } catch (e) {
-    console.error(e);
-    return new Response(JSON.stringify({ error: (e as Error).message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    return json({
+      csv,
+      file_name: intendedFileName,
+      row_count: insertRows.length,
     });
+  } catch (e) {
+    const msg = (e as Error).message ?? "Onbekende fout bij export.";
+    console.error(e);
+    await logFailure(msg);
+    return json({ error: msg }, 500);
   }
 });

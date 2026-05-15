@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+
 import { RefreshCw, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
@@ -41,24 +41,20 @@ export function VerkoopOrderTab({
     },
   });
 
-  const { data: lastExport } = useQuery({
-    queryKey: ["last-export-vol", caseId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("verkooporder_lines")
-        .select("created_at")
-        .eq("case_id", caseId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      return data;
-    },
-  });
-
   const sourceCount = useMemo(
     () =>
       material.filter((m: any) => Number(m.total_quantity) > 0 && m.article_number)
         .length,
+    [material],
+  );
+
+  const orphanCount = useMemo(
+    () =>
+      material.filter(
+        (m: any) =>
+          Number(m.total_quantity) > 0 &&
+          (!m.article_number || String(m.article_number).trim() === ""),
+      ).length,
     [material],
   );
 
@@ -85,10 +81,14 @@ export function VerkoopOrderTab({
         const { error } = await supabase.from("verkooporder_lines").insert(insert);
         if (error) throw error;
       }
+      await supabase
+        .from("cases")
+        .update({ last_verkooporder_rebuild_at: new Date().toISOString() })
+        .eq("id", caseId);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["verkooporder", caseId] });
-      qc.invalidateQueries({ queryKey: ["last-export-vol", caseId] });
+      qc.invalidateQueries({ queryKey: ["case", caseId] });
       toast.success("Verkooporder preview opnieuw opgebouwd");
     },
   });
@@ -102,6 +102,9 @@ export function VerkoopOrderTab({
     !caseRow.so_number || !caseRow.so_customernumber || !caseRow.so_project;
 
   const stale = caseRow.export_stale === true;
+
+  const fmt = (v: string | null | undefined) =>
+    v ? new Date(v).toLocaleString("nl-NL") : "—";
 
   return (
     <div className="space-y-4">
@@ -119,28 +122,32 @@ export function VerkoopOrderTab({
         <Card className="flex items-start gap-2 border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
           <AlertTriangle className="mt-0.5 h-4 w-4" />
           <div>
-            Materiaal is gewijzigd na de laatste export — Verkooporder is
-            verouderd. Bij een nieuwe CSV-export wordt automatisch opnieuw
-            opgebouwd.
+            Materiaal of instellingen zijn gewijzigd na de laatste export —
+            Verkooporder is verouderd. Bij een nieuwe CSV-export wordt
+            automatisch opnieuw opgebouwd.
+          </div>
+        </Card>
+      )}
+      {orphanCount > 0 && (
+        <Card className="flex items-start gap-2 border-rose-300 bg-rose-50 p-3 text-sm text-rose-800">
+          <AlertTriangle className="mt-0.5 h-4 w-4" />
+          <div>
+            <strong>{orphanCount}</strong> materiaalregel(s) met hoeveelheid &gt; 0
+            zonder artikelnummer. CSV-export wordt geblokkeerd tot dit is
+            opgelost.
           </div>
         </Card>
       )}
 
-      <Card className="grid grid-cols-5 gap-4 p-4 text-sm">
+      <Card className="grid grid-cols-3 gap-4 p-4 text-sm md:grid-cols-6">
         <Stat label="Bronregels (materiaal > 0)" value={sourceCount} />
         <Stat label="Verkooporderregels" value={rows.length} />
         <Stat label="Totaal aantal" value={total} />
+        <Stat label="Zonder artikelnr." value={orphanCount} />
+        <Stat label="Laatste rebuild" value={fmt(caseRow.last_verkooporder_rebuild_at)} />
         <Stat
-          label="Laatste opbouw"
-          value={
-            lastExport?.created_at
-              ? new Date(lastExport.created_at).toLocaleString("nl-NL")
-              : "—"
-          }
-        />
-        <Stat
-          label="Status"
-          value={stale ? "Verouderd" : rows.length === 0 ? "Leeg" : "Actueel"}
+          label="Laatste export"
+          value={fmt(caseRow.last_exported_at)}
         />
       </Card>
 
@@ -210,5 +217,3 @@ function Stat({ label, value }: { label: string; value: any }) {
   );
 }
 
-// Badge import kept for potential future use
-export { Badge };

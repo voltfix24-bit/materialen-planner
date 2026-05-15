@@ -1,5 +1,22 @@
 import "./lib/error-capture";
 
+// SSR polyfill: the auto-generated Supabase browser client touches `localStorage`
+// at module evaluation. On the server that throws and crashes SSR. Provide a
+// no-op storage so module init succeeds; real session persistence still happens
+// in the browser where the real localStorage exists.
+if (typeof (globalThis as any).localStorage === "undefined") {
+  const noop = {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+    clear: () => {},
+    key: () => null,
+    length: 0,
+  };
+  (globalThis as any).localStorage = noop;
+  (globalThis as any).sessionStorage = noop;
+}
+
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 
