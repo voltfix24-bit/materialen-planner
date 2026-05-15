@@ -128,15 +128,35 @@ function LianderPage() {
     return true;
   });
 
+  async function logFailedImport(file: File, parsed: ParseResult | null, message: string) {
+    try {
+      await supabase.from("liander_assortment_imports").insert({
+        file_name: file.name,
+        imported_by: "system",
+        total_rows: parsed?.total_rows ?? 0,
+        status: "failed",
+        error_message: message,
+        sheet_name: parsed?.sheet_name ?? null,
+        header_row_index: parsed?.header_row_index ?? null,
+        skipped_rows_count: parsed?.skipped_rows ?? 0,
+        warnings: parsed?.warnings?.length ? parsed.warnings : null,
+      });
+      qc.invalidateQueries({ queryKey: ["liander-imports"] });
+    } catch {
+      /* swallow — best-effort logging */
+    }
+  }
+
   async function handleFile(file: File) {
     setParsing(true);
+    let parsed: ParseResult | null = null;
     try {
-      const parsed = await parseLianderFile(file);
+      parsed = await parseLianderFile(file);
 
       if (parsed.rows.length === 0) {
-        toast.error(
-          "Import geblokkeerd: er zijn geen geldige artikelregels gevonden.",
-        );
+        const msg = "Import geblokkeerd: er zijn geen geldige artikelregels gevonden.";
+        toast.error(msg);
+        await logFailedImport(file, parsed, msg);
         return;
       }
 
@@ -172,7 +192,9 @@ function LianderPage() {
         diff: { new_count, update_count, inactive_count, new_articles, inactive_articles },
       });
     } catch (e: any) {
-      toast.error(e.message ?? "Kon bestand niet lezen");
+      const msg = e?.message ?? "Kon bestand niet lezen";
+      toast.error(msg);
+      await logFailedImport(file, parsed, msg);
     } finally {
       setParsing(false);
       if (fileRef.current) fileRef.current.value = "";
