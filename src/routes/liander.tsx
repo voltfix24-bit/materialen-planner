@@ -287,6 +287,18 @@ function LianderPage() {
         </div>
       </div>
 
+      <Card className="border-amber-200 bg-amber-50/60 p-3 text-xs text-amber-900">
+        <div className="mb-1 flex items-center gap-2 font-semibold">
+          <AlertTriangle className="h-4 w-4" /> Let op bij Excel-bronbestanden
+        </div>
+        <ul className="ml-5 list-disc space-y-0.5">
+          <li>Stel artikelnummer-kolommen in Excel in als <strong>Tekst</strong>.</li>
+          <li>Voorloopnullen kunnen verloren gaan als Excel artikelnummers als getal opslaat.</li>
+          <li>De importer waarschuwt bij verdachte artikelnummers, maar kan brondata die Excel al heeft aangepast niet altijd herstellen.</li>
+          <li>Bij twijfel: importeer eerst de preview en controleer waarschuwingen vóór bevestiging.</li>
+        </ul>
+      </Card>
+
       {/* Stats — based on last COMPLETED import */}
       <div>
         <h2 className="mb-2 text-sm font-semibold text-slate-700">
