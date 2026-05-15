@@ -485,7 +485,12 @@ function TemplatePreviewDialog({ templateId, onClose }: { templateId: string; on
                   <TableCell className="text-xs">{l.description ?? ""}</TableCell>
                   <TableCell className="text-right text-xs">{l.default_quantity ?? ""}</TableCell>
                   <TableCell className="text-xs">{l.unit ?? ""}</TableCell>
-                  <TableCell className="text-xs">{l.excel_category_id ?? ""}</TableCell>
+                  <TableCell className="text-xs">
+                    {l.excel_category_id ?? ""}
+                    {l.category_id == null && l.excel_category_id != null && !l.is_section_header && !l.is_blank_or_separator && (
+                      <Badge variant="outline" className="ml-1 border-amber-400 text-amber-700">Cat niet gematcht</Badge>
+                    )}
+                  </TableCell>
                   <TableCell className="text-xs">
                     <Badge variant="secondary">{l.source_type ?? "—"}</Badge>
                   </TableCell>
