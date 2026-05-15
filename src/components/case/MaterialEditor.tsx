@@ -715,6 +715,7 @@ function LineRow({
 
 function SourceBadge({ source }: { source: string | null }) {
   const s = (source ?? "").toLowerCase();
+  if (s === "template") return <Badge className="bg-indigo-600 text-[10px] hover:bg-indigo-600">Template</Badge>;
   if (s === "liander") return <Badge variant="outline" className="text-[10px]">Liander</Badge>;
   if (s === "articles") return <Badge variant="outline" className="text-[10px]">Artikelbestand</Badge>;
   if (s === "manual" || s === "manual_add")
