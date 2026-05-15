@@ -361,6 +361,7 @@ export function MaterialEditor({ caseId }: { caseId: string }) {
         <Button variant="outline" onClick={() => setBulkOpen(true)}>
           <ListPlus className="h-4 w-4" /> Meerdere artikelen
         </Button>
+        <ApplyTemplateButton caseId={caseId} />
         <Button
           variant="ghost"
           size="sm"
