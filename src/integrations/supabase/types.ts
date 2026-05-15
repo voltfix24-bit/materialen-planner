@@ -230,10 +230,14 @@ export type Database = {
           created_at: string
           delivery_address: string | null
           description: string | null
+          export_stale: boolean
           id: string
           internal_note: string | null
+          last_exported_at: string | null
+          last_material_change_at: string | null
           project_number: string | null
           so_customernumber: string | null
+          so_number: string | null
           so_project: string | null
           status: string
           template_version: string | null
@@ -247,10 +251,14 @@ export type Database = {
           created_at?: string
           delivery_address?: string | null
           description?: string | null
+          export_stale?: boolean
           id?: string
           internal_note?: string | null
+          last_exported_at?: string | null
+          last_material_change_at?: string | null
           project_number?: string | null
           so_customernumber?: string | null
+          so_number?: string | null
           so_project?: string | null
           status?: string
           template_version?: string | null
@@ -264,10 +272,14 @@ export type Database = {
           created_at?: string
           delivery_address?: string | null
           description?: string | null
+          export_stale?: boolean
           id?: string
           internal_note?: string | null
+          last_exported_at?: string | null
+          last_material_change_at?: string | null
           project_number?: string | null
           so_customernumber?: string | null
+          so_number?: string | null
           so_project?: string | null
           status?: string
           template_version?: string | null
@@ -311,6 +323,7 @@ export type Database = {
           created_at: string
           export_type: string
           exported_at: string
+          exported_by: string | null
           file_name: string | null
           id: string
           row_count: number
@@ -321,6 +334,7 @@ export type Database = {
           created_at?: string
           export_type?: string
           exported_at?: string
+          exported_by?: string | null
           file_name?: string | null
           id?: string
           row_count?: number
@@ -331,6 +345,7 @@ export type Database = {
           created_at?: string
           export_type?: string
           exported_at?: string
+          exported_by?: string | null
           file_name?: string | null
           id?: string
           row_count?: number

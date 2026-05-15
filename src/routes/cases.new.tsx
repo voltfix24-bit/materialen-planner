@@ -23,6 +23,7 @@ function NewCase() {
     delivery_address: "",
     contact_person: "",
     internal_note: "",
+    so_number: "",
     so_customernumber: "",
     so_project: "",
   });
@@ -33,6 +34,9 @@ function NewCase() {
     e.preventDefault();
     setSaving(true);
     const payload: any = { ...form, status: "concept" };
+    // Defaults: so_number = casenummer, so_project = projectnummer (bewerkbaar later)
+    if (!payload.so_number) payload.so_number = payload.case_number || null;
+    if (!payload.so_project) payload.so_project = payload.project_number || null;
     if (!payload.case_date) payload.case_date = null;
     Object.keys(payload).forEach((k) => payload[k] === "" && (payload[k] = null));
     const { data, error } = await supabase

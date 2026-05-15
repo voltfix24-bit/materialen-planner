@@ -1,14 +1,20 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { useState } from "react";
-import { RefreshCw, Trash2 } from "lucide-react";
+import { RefreshCw, Trash2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
-export function AanvullingTab({ caseId, caseRow }: { caseId: string; caseRow: any }) {
+export function AanvullingTab({
+  caseId,
+  caseRow,
+}: {
+  caseId: string;
+  caseRow: any;
+}) {
   const qc = useQueryClient();
 
   const { data: rows = [] } = useQuery({
@@ -18,36 +24,76 @@ export function AanvullingTab({ caseId, caseRow }: { caseId: string; caseRow: an
         .from("case_order_lines")
         .select("*")
         .eq("case_id", caseId)
-        .order("created_at");
+        .order("article_number");
       if (error) throw error;
       return data ?? [];
     },
   });
 
+  const { data: unmatched = [] } = useQuery({
+    queryKey: ["aanvulling-unmatched", caseId],
+    queryFn: async () => {
+      // Material lines with total > 0 but no active Liander match
+      const [{ data: material }, { data: liander }] = await Promise.all([
+        supabase
+          .from("case_material_lines")
+          .select("article_number, description, unit, total_quantity")
+          .eq("case_id", caseId)
+          .gt("total_quantity", 0),
+        supabase
+          .from("liander_assortment_items")
+          .select("article_number")
+          .eq("active", true),
+      ]);
+      const set = new Set(
+        (liander ?? []).map((l: any) => l.article_number).filter(Boolean),
+      );
+      return (material ?? []).filter(
+        (m: any) => m.article_number && !set.has(m.article_number),
+      );
+    },
+  });
+
   const rebuild = useMutation({
     mutationFn: async () => {
-      // Placeholder: build aanvulling from material lines that match Liander assortment
-      const { data: material } = await supabase
+      const { data: material, error: mErr } = await supabase
         .from("case_material_lines")
         .select("article_number, description, unit, total_quantity")
         .eq("case_id", caseId)
         .gt("total_quantity", 0);
-      const { data: liander } = await supabase
+      if (mErr) throw mErr;
+      const { data: liander, error: lErr } = await supabase
         .from("liander_assortment_items")
         .select("id, article_number")
         .eq("active", true);
+      if (lErr) throw lErr;
       const lianderMap = new Map(
         (liander ?? []).map((l: any) => [l.article_number, l.id]),
       );
+      // Aggregate per article_number for matched only
+      const agg = new Map<
+        string,
+        { description: string | null; unit: string | null; qty: number }
+      >();
+      for (const m of material ?? []) {
+        if (!m.article_number || !lianderMap.has(m.article_number)) continue;
+        const cur = agg.get(m.article_number);
+        const qty = (cur?.qty ?? 0) + (Number(m.total_quantity) || 0);
+        agg.set(m.article_number, {
+          description: m.description ?? cur?.description ?? null,
+          unit: m.unit ?? cur?.unit ?? null,
+          qty,
+        });
+      }
       await supabase.from("case_order_lines").delete().eq("case_id", caseId);
-      const insert = (material ?? []).map((m: any) => ({
+      const insert = [...agg.entries()].map(([article, v]) => ({
         case_id: caseId,
-        article_number: m.article_number,
-        description: m.description,
-        unit: m.unit,
-        customer_quantity: Number(m.total_quantity) || 0,
-        matched_liander_assortment_item_id: lianderMap.get(m.article_number) ?? null,
-        match_status: lianderMap.has(m.article_number) ? "match" : "no_match",
+        article_number: article,
+        description: v.description,
+        unit: v.unit,
+        customer_quantity: v.qty,
+        matched_liander_assortment_item_id: lianderMap.get(article) ?? null,
+        match_status: "matched",
       }));
       if (insert.length > 0) {
         const { error } = await supabase.from("case_order_lines").insert(insert);
@@ -56,6 +102,7 @@ export function AanvullingTab({ caseId, caseRow }: { caseId: string; caseRow: an
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["aanvulling", caseId] });
+      qc.invalidateQueries({ queryKey: ["aanvulling-unmatched", caseId] });
       toast.success("Aanvulling opnieuw opgebouwd");
     },
   });
@@ -63,7 +110,10 @@ export function AanvullingTab({ caseId, caseRow }: { caseId: string; caseRow: an
   const updateRow = useMutation({
     mutationFn: async (patch: any) => {
       const { id, ...rest } = patch;
-      const { error } = await supabase.from("case_order_lines").update(rest).eq("id", id);
+      const { error } = await supabase
+        .from("case_order_lines")
+        .update(rest)
+        .eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["aanvulling", caseId] }),
@@ -71,26 +121,42 @@ export function AanvullingTab({ caseId, caseRow }: { caseId: string; caseRow: an
 
   const remove = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("case_order_lines").delete().eq("id", id);
+      const { error } = await supabase
+        .from("case_order_lines")
+        .delete()
+        .eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["aanvulling", caseId] }),
   });
 
+  const totalQty = useMemo(
+    () =>
+      rows.reduce((s: number, r: any) => s + (Number(r.customer_quantity) || 0), 0),
+    [rows],
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-slate-500">
-          Bestelvoorbereiding op basis van de Liander Assortimentslijst. Klant
-          Hoeveelheid is per case.
+          Bestelvoorbereiding richting Liander. Alleen artikelen die voorkomen in
+          de actieve Liander Assortimentslijst worden hier opgenomen.
         </p>
         <Button variant="outline" onClick={() => rebuild.mutate()}>
           <RefreshCw className="h-4 w-4" /> Aanvulling opnieuw opbouwen
         </Button>
       </div>
+
       <Card className="overflow-hidden p-0">
+        <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-2 text-xs text-slate-500">
+          <span>
+            {rows.length} aanvullingsregels · Totaal hoeveelheid:{" "}
+            <span className="font-medium tabular-nums">{totalQty}</span>
+          </span>
+        </div>
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+          <thead className="text-left text-xs uppercase text-slate-500">
             <tr>
               <th className="px-4 py-2">Artikelnr</th>
               <th className="px-4 py-2">Omschrijving</th>
@@ -127,13 +193,9 @@ export function AanvullingTab({ caseId, caseRow }: { caseId: string; caseRow: an
                 <td className="px-4 py-2">
                   <Badge
                     variant="secondary"
-                    className={
-                      r.match_status === "match"
-                        ? "bg-emerald-100 text-emerald-700"
-                        : "bg-slate-200 text-slate-600"
-                    }
+                    className="bg-emerald-100 text-emerald-700"
                   >
-                    {r.match_status === "match" ? "Ja" : "Nee"}
+                    Ja
                   </Badge>
                 </td>
                 <td className="px-4 py-2">{caseRow.case_number}</td>
@@ -156,6 +218,54 @@ export function AanvullingTab({ caseId, caseRow }: { caseId: string; caseRow: an
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+
+      <Card className="overflow-hidden p-0">
+        <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          <AlertTriangle className="h-4 w-4" />
+          <span className="font-medium">
+            Niet gevonden in actieve Liander Assortimentslijst
+          </span>
+          <span className="text-xs text-amber-700">
+            ({unmatched.length} artikel{unmatched.length === 1 ? "" : "en"})
+          </span>
+        </div>
+        <table className="w-full text-sm">
+          <thead className="text-left text-xs uppercase text-slate-500">
+            <tr>
+              <th className="px-4 py-2">Artikelnr</th>
+              <th className="px-4 py-2">Omschrijving</th>
+              <th className="px-4 py-2 text-right">Hoeveelheid</th>
+              <th className="px-4 py-2">Eenheid</th>
+              <th className="px-4 py-2">Reden</th>
+            </tr>
+          </thead>
+          <tbody>
+            {unmatched.length === 0 && (
+              <tr>
+                <td
+                  colSpan={5}
+                  className="px-4 py-6 text-center text-xs text-slate-400"
+                >
+                  Geen ongematchte artikelen.
+                </td>
+              </tr>
+            )}
+            {unmatched.map((m: any) => (
+              <tr key={m.article_number} className="border-t">
+                <td className="px-4 py-2 font-mono text-xs">{m.article_number}</td>
+                <td className="px-4 py-2">{m.description}</td>
+                <td className="px-4 py-2 text-right tabular-nums">
+                  {Number(m.total_quantity)}
+                </td>
+                <td className="px-4 py-2 text-slate-500">{m.unit}</td>
+                <td className="px-4 py-2 text-amber-700">
+                  Niet gevonden in actieve Liander Assortimentslijst
                 </td>
               </tr>
             ))}

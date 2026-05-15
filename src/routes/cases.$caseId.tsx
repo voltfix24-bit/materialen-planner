@@ -66,9 +66,12 @@ function CaseDetail() {
         { body: { case_id: caseId } },
       );
       if (error) throw error;
-      // data is csv text — also returned as { csv, file_name }
-      const csv = typeof data === "string" ? data : data.csv;
-      const fileName = typeof data === "string" ? `Case ${caseId}.csv` : data.file_name;
+      if (data?.error) {
+        toast.error(data.error, { id: "export" });
+        return;
+      }
+      const csv = data.csv;
+      const fileName = data.file_name ?? `Case ${caseId}.csv`;
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -76,12 +79,15 @@ function CaseDetail() {
       a.download = fileName;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success("CSV gedownload", { id: "export" });
+      toast.success(`CSV gedownload (${data.row_count} regels)`, { id: "export" });
       qc.invalidateQueries({ queryKey: ["case", caseId] });
       qc.invalidateQueries({ queryKey: ["export-logs", caseId] });
+      qc.invalidateQueries({ queryKey: ["verkooporder", caseId] });
       qc.invalidateQueries({ queryKey: ["cases"] });
     } catch (e: any) {
-      toast.error("Export mislukt: " + e.message, { id: "export" });
+      toast.error("Export mislukt: " + (e?.message ?? "onbekende fout"), {
+        id: "export",
+      });
     }
   };
 
@@ -108,6 +114,22 @@ function CaseDetail() {
               <Badge className={s.className} variant="secondary">
                 {s.label}
               </Badge>
+              {caseRow.export_stale && (
+                <Badge
+                  variant="secondary"
+                  className="bg-amber-100 text-amber-800"
+                >
+                  Gewijzigd na export
+                </Badge>
+              )}
+              {!caseRow.export_stale && caseRow.last_exported_at && (
+                <Badge
+                  variant="secondary"
+                  className="bg-emerald-100 text-emerald-800"
+                >
+                  Export actueel
+                </Badge>
+              )}
             </div>
             <div className="mt-1 text-sm text-slate-500">
               {caseRow.project_number ? `Project ${caseRow.project_number} · ` : ""}

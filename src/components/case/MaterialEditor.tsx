@@ -61,8 +61,8 @@ export function MaterialEditor({ caseId }: { caseId: string }) {
         .from("case_material_lines")
         .select("*")
         .eq("case_id", caseId)
-        .order("category_id", { nullsFirst: true })
-        .order("sort_order");
+        .order("sort_order", { ascending: true })
+        .order("article_number", { ascending: true, nullsFirst: false });
       if (error) throw error;
       return (data as any) ?? [];
     },
@@ -254,6 +254,7 @@ function CategoryBlock({
           <table className="w-full text-sm">
             <thead className="text-left text-xs uppercase text-slate-500">
               <tr className="border-t">
+                <th className="px-3 py-2 w-16">Volgorde</th>
                 <th className="px-3 py-2">Artikelnr</th>
                 <th className="px-3 py-2">Omschrijving</th>
                 <th className="px-3 py-2 w-20">Eenheid</th>
@@ -279,6 +280,12 @@ function CategoryBlock({
                       negative && "bg-red-50/40",
                     )}
                   >
+                    <td className="px-3 py-2">
+                      <NumberCell
+                        value={l.sort_order}
+                        onChange={(v) => onUpdate({ id: l.id, sort_order: v })}
+                      />
+                    </td>
                     <td className="px-3 py-2 font-mono text-xs">
                       <div className="flex items-center gap-2">
                         {l.article_number || (
