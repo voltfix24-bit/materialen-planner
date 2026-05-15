@@ -83,6 +83,9 @@ export type Database = {
           charge_or_haspel_number: string | null
           created_at: string
           description: string | null
+          excel_row_number: number | null
+          formula_source_text: string | null
+          formula_status: string | null
           id: string
           is_auto_generated: boolean
           is_manual: boolean
@@ -91,6 +94,8 @@ export type Database = {
           return_quantity: number
           sort_order: number
           source_rule: string | null
+          source_template_id: string | null
+          template_line_id: string | null
           total_quantity: number
           unit: string | null
           updated_at: string
@@ -105,6 +110,9 @@ export type Database = {
           charge_or_haspel_number?: string | null
           created_at?: string
           description?: string | null
+          excel_row_number?: number | null
+          formula_source_text?: string | null
+          formula_status?: string | null
           id?: string
           is_auto_generated?: boolean
           is_manual?: boolean
@@ -113,6 +121,8 @@ export type Database = {
           return_quantity?: number
           sort_order?: number
           source_rule?: string | null
+          source_template_id?: string | null
+          template_line_id?: string | null
           total_quantity?: number
           unit?: string | null
           updated_at?: string
@@ -127,6 +137,9 @@ export type Database = {
           charge_or_haspel_number?: string | null
           created_at?: string
           description?: string | null
+          excel_row_number?: number | null
+          formula_source_text?: string | null
+          formula_status?: string | null
           id?: string
           is_auto_generated?: boolean
           is_manual?: boolean
@@ -135,6 +148,8 @@ export type Database = {
           return_quantity?: number
           sort_order?: number
           source_rule?: string | null
+          source_template_id?: string | null
+          template_line_id?: string | null
           total_quantity?: number
           unit?: string | null
           updated_at?: string
@@ -217,6 +232,50 @@ export type Database = {
             columns: ["matched_liander_assortment_item_id"]
             isOneToOne: false
             referencedRelation: "liander_assortment_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      case_template_applications: {
+        Row: {
+          applied_at: string
+          applied_by: string | null
+          case_id: string
+          created_at: string
+          id: string
+          lines_created_count: number
+          note: string | null
+          status: string
+          template_id: string
+        }
+        Insert: {
+          applied_at?: string
+          applied_by?: string | null
+          case_id: string
+          created_at?: string
+          id?: string
+          lines_created_count?: number
+          note?: string | null
+          status?: string
+          template_id: string
+        }
+        Update: {
+          applied_at?: string
+          applied_by?: string | null
+          case_id?: string
+          created_at?: string
+          id?: string
+          lines_created_count?: number
+          note?: string | null
+          status?: string
+          template_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "case_template_applications_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "material_templates"
             referencedColumns: ["id"]
           },
         ]
@@ -506,6 +565,131 @@ export type Database = {
           },
         ]
       }
+      material_template_lines: {
+        Row: {
+          article_number: string | null
+          category_code: string | null
+          category_id: string | null
+          created_at: string
+          default_quantity: number | null
+          default_return_quantity: number | null
+          default_total_quantity: number | null
+          default_used_quantity: number | null
+          description: string | null
+          excel_category_id: number | null
+          excel_row_number: number | null
+          formula_references: Json | null
+          id: string
+          is_blank_or_separator: boolean
+          is_formula_quantity: boolean
+          is_section_header: boolean
+          note: string | null
+          quantity_formula_text: string | null
+          sort_order: number
+          source_type: string | null
+          template_id: string
+          total_formula_text: string | null
+          unit: string | null
+          updated_at: string
+        }
+        Insert: {
+          article_number?: string | null
+          category_code?: string | null
+          category_id?: string | null
+          created_at?: string
+          default_quantity?: number | null
+          default_return_quantity?: number | null
+          default_total_quantity?: number | null
+          default_used_quantity?: number | null
+          description?: string | null
+          excel_category_id?: number | null
+          excel_row_number?: number | null
+          formula_references?: Json | null
+          id?: string
+          is_blank_or_separator?: boolean
+          is_formula_quantity?: boolean
+          is_section_header?: boolean
+          note?: string | null
+          quantity_formula_text?: string | null
+          sort_order?: number
+          source_type?: string | null
+          template_id: string
+          total_formula_text?: string | null
+          unit?: string | null
+          updated_at?: string
+        }
+        Update: {
+          article_number?: string | null
+          category_code?: string | null
+          category_id?: string | null
+          created_at?: string
+          default_quantity?: number | null
+          default_return_quantity?: number | null
+          default_total_quantity?: number | null
+          default_used_quantity?: number | null
+          description?: string | null
+          excel_category_id?: number | null
+          excel_row_number?: number | null
+          formula_references?: Json | null
+          id?: string
+          is_blank_or_separator?: boolean
+          is_formula_quantity?: boolean
+          is_section_header?: boolean
+          note?: string | null
+          quantity_formula_text?: string | null
+          sort_order?: number
+          source_type?: string | null
+          template_id?: string
+          total_formula_text?: string | null
+          unit?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "material_template_lines_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "material_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      material_templates: {
+        Row: {
+          active: boolean
+          created_at: string
+          id: string
+          name: string
+          notes: string | null
+          source_file_name: string | null
+          source_sheet_name: string | null
+          updated_at: string
+          version: string | null
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          name: string
+          notes?: string | null
+          source_file_name?: string | null
+          source_sheet_name?: string | null
+          updated_at?: string
+          version?: string | null
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          name?: string
+          notes?: string | null
+          source_file_name?: string | null
+          source_sheet_name?: string | null
+          updated_at?: string
+          version?: string | null
+        }
+        Relationships: []
+      }
       verkooporder_lines: {
         Row: {
           case_id: string
@@ -558,6 +742,10 @@ export type Database = {
       _mark_case_material_dirty: {
         Args: { p_case_id: string }
         Returns: undefined
+      }
+      apply_material_template_to_case: {
+        Args: { p_case_id: string; p_mode?: string; p_template_id: string }
+        Returns: Json
       }
       bulk_add_case_material_lines: {
         Args: { p_case_id: string; p_lines: Json }
