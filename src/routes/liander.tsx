@@ -607,6 +607,45 @@ function LianderPage() {
                 <DiffStat label="Inactief" value={preview.diff.inactive_count} tone="amber" />
               </div>
 
+              {preview.parsed.duplicates.length > 0 && (
+                <div className="rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-800">
+                  <div className="mb-1 flex items-center gap-1 font-semibold">
+                    <XCircle className="h-3.5 w-3.5" />
+                    Import geblokkeerd: dubbele artikelnummers in bestand (
+                    {preview.parsed.duplicates.length})
+                  </div>
+                  <ul className="list-disc pl-4 space-y-0.5">
+                    {preview.parsed.duplicates.slice(0, 10).map((d) => (
+                      <li key={d.article_number}>
+                        <span className="font-mono">{d.article_number}</span>{" "}
+                        <span className="text-red-600">
+                          (rij {d.rows.join(", ")})
+                        </span>
+                      </li>
+                    ))}
+                    {preview.parsed.duplicates.length > 10 && <li>…</li>}
+                  </ul>
+                </div>
+              )}
+
+              {preview.parsed.suspicious.length > 0 && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                  <div className="mb-1 flex items-center gap-1 font-semibold">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    Verdachte artikelnummers ({preview.parsed.suspicious.length})
+                  </div>
+                  <ul className="list-disc pl-4 space-y-0.5">
+                    {preview.parsed.suspicious.slice(0, 10).map((s, i) => (
+                      <li key={i}>
+                        <span className="font-mono">{s.article_number}</span> —{" "}
+                        {s.reason} (rij {s.row})
+                      </li>
+                    ))}
+                    {preview.parsed.suspicious.length > 10 && <li>…</li>}
+                  </ul>
+                </div>
+              )}
+
               {preview.parsed.warnings.length > 0 && (
                 <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
                   <div className="mb-1 flex items-center gap-1 font-semibold">
@@ -641,7 +680,14 @@ function LianderPage() {
             >
               Annuleren
             </Button>
-            <Button onClick={commitImport} disabled={committing || !preview}>
+            <Button
+              onClick={commitImport}
+              disabled={
+                committing ||
+                !preview ||
+                preview.parsed.has_blocking_errors
+              }
+            >
               {committing ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
