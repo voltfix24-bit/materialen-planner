@@ -536,6 +536,14 @@ function LianderPage() {
                         <div className="text-slate-500">
                           {new Date(imp.import_date).toLocaleDateString("nl-NL")}
                         </div>
+                        {lastCompletedId && it.import_id === lastCompletedId && (
+                          <Badge
+                            variant="outline"
+                            className="mt-1 border-sky-200 bg-sky-50 text-sky-700"
+                          >
+                            Gewijzigd in laatste import
+                          </Badge>
+                        )}
                       </>
                     ) : (
                       <span className="text-slate-400">—</span>
