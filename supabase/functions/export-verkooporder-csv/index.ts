@@ -187,6 +187,8 @@ Deno.serve(async (req) => {
       row_count: rows.length,
       status: "success",
       exported_by: "system",
+      csv_config: CSV_CONFIG_SNAPSHOT,
+      csv_header: CSV_HEADER_LINE,
     });
 
     // 6. Case bijwerken
@@ -206,6 +208,8 @@ Deno.serve(async (req) => {
       row_count: rows.length,
       rebuild: result,
       csv_config: CSV_CONFIG,
+      csv_config_version: CSV_CONFIG_VERSION,
+      csv_header: CSV_HEADER_LINE,
     });
   } catch (e) {
     const msg = (e as Error).message ?? "Onbekende fout bij export.";
