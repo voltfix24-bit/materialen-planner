@@ -313,6 +313,7 @@ export type Database = {
           export_stale: boolean
           id: string
           internal_note: string | null
+          last_aanvulling_rebuild_at: string | null
           last_exported_at: string | null
           last_material_change_at: string | null
           last_verkooporder_rebuild_at: string | null
@@ -335,6 +336,7 @@ export type Database = {
           export_stale?: boolean
           id?: string
           internal_note?: string | null
+          last_aanvulling_rebuild_at?: string | null
           last_exported_at?: string | null
           last_material_change_at?: string | null
           last_verkooporder_rebuild_at?: string | null
@@ -357,6 +359,7 @@ export type Database = {
           export_stale?: boolean
           id?: string
           internal_note?: string | null
+          last_aanvulling_rebuild_at?: string | null
           last_exported_at?: string | null
           last_material_change_at?: string | null
           last_verkooporder_rebuild_at?: string | null
@@ -781,6 +784,38 @@ export type Database = {
       bulk_add_case_material_lines: {
         Args: { p_case_id: string; p_lines: Json }
         Returns: Json
+      }
+      get_case_aanvulling_lines: {
+        Args: { p_case_id: string }
+        Returns: {
+          article_number: string
+          case_order_line_id: string
+          customer_quantity: number
+          description: string
+          last_liander_import_date: string
+          liander_active: boolean
+          liander_description: string
+          liander_unit: string
+          match_status: string
+          matched_liander_assortment_item_id: string
+          note: string
+          source_material_line_count: number
+          source_total_quantity: number
+          unit: string
+        }[]
+      }
+      get_case_aanvulling_unmatched_lines: {
+        Args: { p_case_id: string }
+        Returns: {
+          article_number: string
+          category_name: string
+          description: string
+          liander_status: string
+          reason: string
+          source_material_line_count: number
+          source_total_quantity: number
+          unit: string
+        }[]
       }
       get_case_material_lines_with_status: {
         Args: { p_case_id: string }
