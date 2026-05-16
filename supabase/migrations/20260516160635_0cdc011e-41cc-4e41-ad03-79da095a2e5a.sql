@@ -1,0 +1,1 @@
+UPDATE public.material_template_lines SET source_type = 'terrevolt' WHERE source_type = 'vdh';
