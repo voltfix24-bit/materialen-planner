@@ -307,7 +307,7 @@ function ImportTemplateDialog({
           <div className="grid grid-cols-2 gap-3">
             <label className="text-sm">
               <span className="mb-1 block text-xs font-medium text-slate-600">Naam</span>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Van den Heuvel Materiaalstaat" />
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="TerreVolt Materiaalstaat" />
             </label>
             <label className="text-sm">
               <span className="mb-1 block text-xs font-medium text-slate-600">Versie</span>
