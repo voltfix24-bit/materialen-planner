@@ -18,7 +18,7 @@ export type TemplateLine = {
   quantity_formula_text: string | null;
   total_formula_text: string | null;
   formula_references: any | null;
-  source_type: "vdh" | "liander" | "internal_code" | "section_header" | "unknown";
+  source_type: "terrevolt" | "liander" | "internal_code" | "section_header" | "unknown";
 };
 
 export type TemplateParseResult = {
