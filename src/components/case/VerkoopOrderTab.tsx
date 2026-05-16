@@ -135,8 +135,14 @@ export function VerkoopOrderTab({
     onSuccess: (result: any) => {
       qc.invalidateQueries({ queryKey: ["verkooporder-rpc", caseId] });
       qc.invalidateQueries({ queryKey: ["case", caseId] });
+      qc.invalidateQueries({ queryKey: ["case-export-readiness", caseId] });
       if (!result?.success) {
-        toast.error(result?.message ?? `Rebuild mislukt: ${result?.error}`);
+        const blocking = (result?.blocking_items ?? []) as Array<{ message: string }>;
+        const msg =
+          blocking.length > 0
+            ? blocking.map((b) => `• ${b.message}`).join("\n")
+            : (result?.message ?? `Rebuild mislukt: ${result?.error_code ?? result?.error}`);
+        toast.error(msg);
         return;
       }
       toast.success(
