@@ -50,6 +50,24 @@ export function VerkoopOrderTab({
 
   const rows = rowsQuery.data ?? [];
 
+  const readinessQuery = useQuery({
+    queryKey: ["case-export-readiness", caseId],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc(
+        "get_case_export_readiness" as any,
+        { p_case_id: caseId },
+      );
+      if (error) throw error;
+      return data as any;
+    },
+  });
+  const readiness = readinessQuery.data;
+  const readyForExport: boolean = !!readiness?.ready;
+  const readinessBlocking: Array<{ code: string; message: string }> =
+    readiness?.blocking_items ?? [];
+  const readinessWarnings: Array<{ code: string; message: string }> =
+    readiness?.warning_items ?? [];
+
   const { data: aanvullingCount = 0 } = useQuery({
     queryKey: ["aanvulling-count", caseId],
     queryFn: async () => {
