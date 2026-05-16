@@ -410,6 +410,8 @@ export type Database = {
         Row: {
           case_id: string | null
           created_at: string
+          csv_config: Json | null
+          csv_header: string | null
           error_message: string | null
           export_type: string
           exported_at: string
@@ -422,6 +424,8 @@ export type Database = {
         Insert: {
           case_id?: string | null
           created_at?: string
+          csv_config?: Json | null
+          csv_header?: string | null
           error_message?: string | null
           export_type?: string
           exported_at?: string
@@ -434,6 +438,8 @@ export type Database = {
         Update: {
           case_id?: string | null
           created_at?: string
+          csv_config?: Json | null
+          csv_header?: string | null
           error_message?: string | null
           export_type?: string
           exported_at?: string

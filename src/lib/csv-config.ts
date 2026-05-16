@@ -1,5 +1,9 @@
 // CSV-formaat config — frontend mirror van edge function CSV_CONFIG.
 // Houd dit synchroon met supabase/functions/export-verkooporder-csv/index.ts.
+// Bij elke wijziging aan separator / line_ending / decimal_separator / headers
+// MOET CSV_CONFIG_VERSION ook hier én in de edge function meeverhoogd worden.
+export const CSV_CONFIG_VERSION = "verkooporder_csv_v1";
+
 export const CSV_CONFIG: {
   separator: string;
   include_header: boolean;
