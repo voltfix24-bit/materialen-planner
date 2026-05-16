@@ -38,7 +38,7 @@ export function AppLayout() {
                   to={n.to}
                   className={cn(
                     "rounded-md px-3 py-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900",
-                    active && "bg-slate-900 text-white hover:bg-slate-900 hover:text-white",
+                    active && "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground shadow-sm ring-1 ring-inset ring-[oklch(0.72_0.18_145_/_0.35)]",
                   )}
                 >
                   {n.label}

@@ -18,10 +18,11 @@ import { parseTemplateFile, type TemplateParseResult } from "@/lib/template-pars
 
 function sourceTypeLabel(s: string | null | undefined): string {
   if (!s) return "—";
-  if (s === "vdh") return "TerreVolt";
+  if (s === "terrevolt" || s === "vdh") return "TerreVolt";
   if (s === "liander") return "Liander";
-  if (s === "internal_code") return "Intern";
-  if (s === "section_header") return "Sectie";
+  if (s === "internal_code") return "Interne code";
+  if (s === "section_header") return "Sectieheader";
+  if (s === "unknown") return "Onbekend";
   return s;
 }
 
