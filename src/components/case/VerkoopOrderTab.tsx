@@ -527,6 +527,7 @@ export function VerkoopOrderTab({
         </div>
         <div className="mb-2 grid grid-cols-2 gap-2 text-xs text-slate-600 md:grid-cols-4">
           <Meta k="bestand" v={appFileName} />
+          <Meta k="csv_config_version" v={CSV_CONFIG_VERSION} />
           <Meta k="separator" v={JSON.stringify(CSV_CONFIG.separator)} />
           <Meta k="header" v={CSV_CONFIG.include_header ? "ja" : "nee"} />
           <Meta k="encoding" v={CSV_CONFIG.encoding} />
@@ -536,6 +537,37 @@ export function VerkoopOrderTab({
           <Meta k="totaal datarijen" v={String(diagnostics.csvRowCount)} />
           <Meta k="gegenereerd" v={new Date().toLocaleString("nl-NL")} />
         </div>
+        {lastExportMeta && (
+          <div className="mb-2 rounded border border-slate-200 bg-slate-50 p-2 text-xs">
+            <div className="mb-1 font-medium text-slate-700">
+              Laatste export (server-respons)
+            </div>
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+              <Meta k="file" v={lastExportMeta.file_name ?? "—"} />
+              <Meta k="rows" v={String(lastExportMeta.row_count ?? "—")} />
+              <Meta
+                k="server csv_config_version"
+                v={lastExportMeta.csv_config_version ?? "—"}
+              />
+              <Meta
+                k="server header"
+                v={lastExportMeta.csv_header ?? "—"}
+              />
+            </div>
+            {lastExportMeta.csv_config_version &&
+              lastExportMeta.csv_config_version !== CSV_CONFIG_VERSION && (
+                <div className="mt-2 flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-2 text-amber-800">
+                  <AlertTriangle className="mt-0.5 h-3 w-3" />
+                  <div>
+                    Preview-config versie ({CSV_CONFIG_VERSION}) verschilt van
+                    export-config versie ({lastExportMeta.csv_config_version}).
+                    Update <code>src/lib/csv-config.ts</code> en de edge
+                    function zodat ze weer gelijk lopen.
+                  </div>
+                </div>
+              )}
+          </div>
+        )}
         <pre className="overflow-x-auto rounded bg-slate-950 p-3 text-xs text-slate-100">
           {previewLines.length === 0
             ? "(leeg — geen regels om te exporteren)"
