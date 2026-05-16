@@ -16,6 +16,15 @@ import { toast } from "sonner";
 import { Upload, FileSpreadsheet, Trash2, Eye, Power } from "lucide-react";
 import { parseTemplateFile, type TemplateParseResult } from "@/lib/template-parser";
 
+function sourceTypeLabel(s: string | null | undefined): string {
+  if (!s) return "—";
+  if (s === "vdh") return "TerreVolt";
+  if (s === "liander") return "Liander";
+  if (s === "internal_code") return "Intern";
+  if (s === "section_header") return "Sectie";
+  return s;
+}
+
 export const Route = createFileRoute("/templates")({
   component: TemplatesPage,
 });
