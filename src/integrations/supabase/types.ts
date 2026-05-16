@@ -856,6 +856,7 @@ export type Database = {
           used_quantity: number
         }[]
       }
+      get_case_readiness: { Args: { p_case_id: string }; Returns: Json }
       get_case_verbruik_lines: {
         Args: { p_case_id: string }
         Returns: {

@@ -21,6 +21,7 @@ import { VerbruikTab } from "@/components/case/VerbruikTab";
 import { AanvullingTab } from "@/components/case/AanvullingTab";
 import { VerkoopOrderTab } from "@/components/case/VerkoopOrderTab";
 import { ExportLogTab } from "@/components/case/ExportLogTab";
+import { CaseControlPanel } from "@/components/case/CaseControlPanel";
 
 export const Route = createFileRoute("/cases/$caseId")({ component: CaseDetail });
 
@@ -193,6 +194,7 @@ function CaseDetail() {
           <TabsTrigger value="aanvulling">Aanvulling</TabsTrigger>
           <TabsTrigger value="verkoop">Verkooporder</TabsTrigger>
           <TabsTrigger value="logs">Exportlog</TabsTrigger>
+          <TabsTrigger value="control">Controle</TabsTrigger>
         </TabsList>
         <TabsContent value="overview" className="mt-4">
           <OverviewTab caseRow={caseRow} />
@@ -211,6 +213,9 @@ function CaseDetail() {
         </TabsContent>
         <TabsContent value="logs" className="mt-4">
           <ExportLogTab caseId={caseId} />
+        </TabsContent>
+        <TabsContent value="control" className="mt-4">
+          <CaseControlPanel caseId={caseId} />
         </TabsContent>
       </Tabs>
     </div>
