@@ -99,6 +99,7 @@ function Dashboard() {
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3 text-right">Regels</th>
               <th className="px-4 py-3">Laatste export</th>
+              <th className="px-4 py-3">Export status</th>
             </tr>
           </thead>
           <tbody>
