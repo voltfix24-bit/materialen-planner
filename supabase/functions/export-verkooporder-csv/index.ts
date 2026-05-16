@@ -1,4 +1,7 @@
-// Edge function: export verkooporder as CSV with auto-rebuild + safety guards
+// Edge function: export verkooporder as CSV.
+// Bron = case_order_lines (Aanvulling). Rebuild gebeurt server-side via
+// public.rebuild_verkooporder_lines voordat de CSV wordt opgebouwd, zodat
+// CSV nooit afhankelijk is van verouderde frontend state.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -8,11 +11,60 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// CSV-formaat config — één centrale plek
+const CSV_CONFIG = {
+  separator: ",",
+  include_header: true,
+  encoding: "utf-8",
+  decimal: ".",
+  line_ending: "\n",
+};
+
+const CSV_HEADERS = [
+  "sol_articlenumber",
+  "sol_quantity",
+  "so_number",
+  "so_customernumber",
+  "so_project",
+];
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+
+function csvEscape(v: unknown): string {
+  const s = v == null ? "" : String(v);
+  const sep = CSV_CONFIG.separator;
+  const needsQuote =
+    s.includes(sep) || s.includes('"') || s.includes("\n") || s.includes("\r");
+  return needsQuote ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function formatNumber(n: number | string): string {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return "";
+  const s = String(num);
+  return CSV_CONFIG.decimal === "," ? s.replace(".", ",") : s;
+}
+
+function buildCsv(rows: any[]): string {
+  const out: string[] = [];
+  if (CSV_CONFIG.include_header) out.push(CSV_HEADERS.join(CSV_CONFIG.separator));
+  for (const r of rows) {
+    out.push(
+      [
+        csvEscape(r.sol_articlenumber),
+        formatNumber(r.sol_quantity),
+        csvEscape(r.so_number),
+        csvEscape(r.so_customernumber),
+        csvEscape(r.so_project),
+      ].join(CSV_CONFIG.separator),
+    );
+  }
+  return out.join(CSV_CONFIG.line_ending) + CSV_CONFIG.line_ending;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -50,138 +102,86 @@ Deno.serve(async (req) => {
       return json({ error: "case_id is required" }, 400);
     }
 
-    // 1. Validate case + SO settings
+    // 1. Lees case voor bestandsnaam en validatie
     const { data: caseRow, error: caseErr } = await supabase
       .from("cases")
-      .select("id, case_number, so_number, so_customernumber, so_project")
+      .select(
+        "id, case_number, so_number, so_customernumber, so_project, last_aanvulling_rebuild_at, last_material_change_at",
+      )
       .eq("id", case_id)
       .single();
     if (caseErr) throw caseErr;
 
     intendedFileName = `Case ${caseRow.case_number ?? case_id}.csv`;
 
-    const missing: string[] = [];
-    if (!caseRow.so_number) missing.push("so_number");
-    if (!caseRow.so_customernumber) missing.push("so_customernumber");
-    if (!caseRow.so_project) missing.push("so_project");
-    if (missing.length > 0) {
-      const msg = `Vul eerst de verkooporder instellingen in (${missing.join(", ")}).`;
+    // 2. Server-side rebuild vanuit Aanvulling (case_order_lines)
+    const { data: rebuildResult, error: rebuildErr } = await supabase.rpc(
+      "rebuild_verkooporder_lines",
+      { p_case_id: case_id },
+    );
+    if (rebuildErr) throw rebuildErr;
+
+    const result = rebuildResult as any;
+    if (!result?.success) {
+      const code = result?.error ?? "unknown";
+      const msgMap: Record<string, string> = {
+        case_not_found: "Case niet gevonden.",
+        missing_verkooporder_settings: `Vul eerst de verkooporder instellingen in (${(result?.missing ?? []).join(", ")}).`,
+        no_aanvulling:
+          "Bouw eerst Aanvulling op voordat je Verkooporder exporteert.",
+        aanvulling_stale:
+          "Aanvulling is verouderd. Bouw eerst Aanvulling opnieuw op.",
+        no_exportable_lines:
+          "Geen exporteerbare regels in de Aanvulling (alle hoeveelheden 0 of artikelnummers ontbreken).",
+      };
+      const msg = msgMap[code] ?? result?.message ?? `Export geblokkeerd (${code}).`;
       await logFailure(msg);
-      return json({ error: msg, missing }, 400);
+      return json(
+        {
+          error: msg,
+          code,
+          missing: result?.missing,
+        },
+        400,
+      );
     }
 
-    // 2. Fetch material lines
-    const { data: material, error: matErr } = await supabase
-      .from("case_material_lines")
-      .select("id, article_number, description, total_quantity")
-      .eq("case_id", case_id);
-    if (matErr) throw matErr;
+    // 3. Lees opgebouwde verkooporder_lines voor CSV
+    const { data: rows, error: rowsErr } = await supabase
+      .from("verkooporder_lines")
+      .select(
+        "sol_articlenumber, sol_quantity, so_number, so_customernumber, so_project",
+      )
+      .eq("case_id", case_id)
+      .order("sol_articlenumber");
+    if (rowsErr) throw rowsErr;
 
-    // 2a. Block: positive total without article_number
-    const orphan = (material ?? []).filter((m: any) => {
-      const n = Number(m.total_quantity);
-      return Number.isFinite(n) && n > 0 && (!m.article_number || String(m.article_number).trim() === "");
-    });
-    if (orphan.length > 0) {
-      const msg = `Export geblokkeerd: ${orphan.length} materiaalregel(s) met hoeveelheid > 0 zonder artikelnummer.`;
-      await logFailure(msg);
-      return json({
-        error: msg,
-        orphan_count: orphan.length,
-        orphan_lines: orphan.map((o: any) => ({
-          id: o.id,
-          description: o.description,
-          total_quantity: o.total_quantity,
-        })),
-      }, 400);
-    }
-
-    // 2b. Block: invalid numeric values
-    const invalid = (material ?? []).filter((m: any) => {
-      if (m.total_quantity == null) return false;
-      const n = Number(m.total_quantity);
-      return !Number.isFinite(n);
-    });
-    if (invalid.length > 0) {
-      const msg = `Export geblokkeerd: ${invalid.length} materiaalregel(s) met ongeldige hoeveelheid.`;
-      await logFailure(msg);
-      return json({ error: msg, invalid_count: invalid.length }, 400);
-    }
-
-    // 3. Aggregate per article_number (only total_quantity > 0)
-    const agg = new Map<string, number>();
-    for (const m of material ?? []) {
-      const n = Number(m.total_quantity);
-      if (!Number.isFinite(n) || n <= 0) continue;
-      if (!m.article_number) continue;
-      agg.set(m.article_number, (agg.get(m.article_number) ?? 0) + n);
-    }
-
-    if (agg.size === 0) {
-      const msg = "Geen exporteerbare regels: er zijn geen materiaalregels met totaal > 0.";
+    if (!rows || rows.length === 0) {
+      const msg = "Geen verkooporderregels na rebuild.";
       await logFailure(msg);
       return json({ error: msg }, 400);
     }
 
-    // 4. Replace verkooporder_lines
-    const { error: delErr } = await supabase
-      .from("verkooporder_lines")
-      .delete()
-      .eq("case_id", case_id);
-    if (delErr) throw delErr;
+    // 4. CSV bouwen
+    const csv = buildCsv(rows);
 
-    const insertRows = [...agg.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([article, qty]) => ({
-        case_id,
-        sol_articlenumber: article,
-        sol_quantity: qty,
-        so_number: caseRow.so_number,
-        so_customernumber: caseRow.so_customernumber,
-        so_project: caseRow.so_project,
-      }));
-
-    const { error: insErr } = await supabase
-      .from("verkooporder_lines")
-      .insert(insertRows);
-    if (insErr) throw insErr;
-
-    // 5. Build CSV
-    const headers = [
-      "sol_articlenumber",
-      "sol_quantity",
-      "so_number",
-      "so_customernumber",
-      "so_project",
-    ];
-    const escape = (v: any) => {
-      const s = v == null ? "" : String(v);
-      return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const csv =
-      headers.join(",") +
-      "\n" +
-      insertRows.map((r: any) => headers.map((h) => escape(r[h])).join(",")).join("\n") +
-      "\n";
-
-    // 6. Log success
+    // 5. Log success
     await supabase.from("export_logs").insert({
       case_id,
       export_type: "verkooporder_csv",
       file_name: intendedFileName,
-      row_count: insertRows.length,
+      row_count: rows.length,
       status: "success",
       exported_by: "system",
     });
 
-    // 7. Update case: clear stale, mark exported, set rebuild timestamp
+    // 6. Case bijwerken
     const now = new Date().toISOString();
     await supabase
       .from("cases")
       .update({
         status: "geexporteerd",
         last_exported_at: now,
-        last_verkooporder_rebuild_at: now,
         export_stale: false,
       })
       .eq("id", case_id);
@@ -189,7 +189,9 @@ Deno.serve(async (req) => {
     return json({
       csv,
       file_name: intendedFileName,
-      row_count: insertRows.length,
+      row_count: rows.length,
+      rebuild: result,
+      csv_config: CSV_CONFIG,
     });
   } catch (e) {
     const msg = (e as Error).message ?? "Onbekende fout bij export.";
