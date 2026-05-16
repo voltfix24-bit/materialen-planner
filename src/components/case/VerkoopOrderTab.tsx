@@ -197,6 +197,7 @@ export function VerkoopOrderTab({
       qc.invalidateQueries({ queryKey: ["verkooporder-rpc", caseId] });
       qc.invalidateQueries({ queryKey: ["case", caseId] });
       qc.invalidateQueries({ queryKey: ["last-export", caseId] });
+      qc.invalidateQueries({ queryKey: ["case-export-readiness", caseId] });
     },
     onError: (e: any) => toast.error("Export mislukt: " + (e?.message ?? e)),
   });
