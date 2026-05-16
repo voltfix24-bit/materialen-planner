@@ -116,7 +116,10 @@ Deno.serve(async (req) => {
       .single();
     if (caseErr) throw caseErr;
 
-    intendedFileName = `Case ${caseRow.case_number ?? case_id}.csv`;
+    intendedFileName = CSV_CONFIG.file_name_pattern.replace(
+      "{case_number}",
+      String(caseRow.case_number ?? case_id),
+    );
 
     // 2. Server-side rebuild vanuit Aanvulling (case_order_lines)
     const { data: rebuildResult, error: rebuildErr } = await supabase.rpc(
