@@ -3,10 +3,15 @@ import { useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { RefreshCw, Trash2, AlertTriangle } from "lucide-react";
+import { RefreshCw, AlertTriangle, Info } from "lucide-react";
 import { toast } from "sonner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 export function AanvullingTab({
   caseId,
@@ -16,19 +21,34 @@ export function AanvullingTab({
   caseRow: any;
 }) {
   const qc = useQueryClient();
+  const [showOnlyIssues, setShowOnlyIssues] = useState(false);
 
-  const { data: rows = [] } = useQuery({
-    queryKey: ["aanvulling", caseId],
+  const matchedQuery = useQuery({
+    queryKey: ["aanvulling-matched", caseId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("case_order_lines")
-        .select("*")
-        .eq("case_id", caseId)
-        .order("article_number");
+      const { data, error } = await supabase.rpc(
+        "get_case_aanvulling_lines" as any,
+        { p_case_id: caseId },
+      );
       if (error) throw error;
-      return data ?? [];
+      return (data as any[]) ?? [];
     },
   });
+
+  const unmatchedQuery = useQuery({
+    queryKey: ["aanvulling-unmatched-rpc", caseId],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc(
+        "get_case_aanvulling_unmatched_lines" as any,
+        { p_case_id: caseId },
+      );
+      if (error) throw error;
+      return (data as any[]) ?? [];
+    },
+  });
+
+  const rows = matchedQuery.data ?? [];
+  const unmatchedAll = unmatchedQuery.data ?? [];
 
   const { data: lianderInfo } = useQuery({
     queryKey: ["aanvulling-liander-info"],
@@ -54,36 +74,23 @@ export function AanvullingTab({
     },
   });
 
-  const { data: unmatched = [] } = useQuery({
-    queryKey: ["aanvulling-unmatched", caseId],
-    queryFn: async () => {
-      // Material lines with total > 0 but no active Liander match
-      const [{ data: material }, { data: liander }] = await Promise.all([
-        supabase
-          .from("case_material_lines")
-          .select("article_number, description, unit, total_quantity")
-          .eq("case_id", caseId)
-          .gt("total_quantity", 0),
-        supabase
-          .from("liander_assortment_items")
-          .select("article_number")
-          .eq("active", true),
-      ]);
-      const set = new Set(
-        (liander ?? []).map((l: any) => l.article_number).filter(Boolean),
-      );
-      return (material ?? []).filter(
-        (m: any) => m.article_number && !set.has(m.article_number),
-      );
-    },
-  });
+  const notFound = useMemo(
+    () => unmatchedAll.filter((u: any) => u.liander_status === "not_found"),
+    [unmatchedAll],
+  );
+  const inactive = useMemo(
+    () => unmatchedAll.filter((u: any) => u.liander_status === "inactive"),
+    [unmatchedAll],
+  );
+  const missingArt = useMemo(
+    () =>
+      unmatchedAll.filter(
+        (u: any) => u.liander_status === "missing_article_number",
+      ),
+    [unmatchedAll],
+  );
 
-  const [lastRebuild, setLastRebuild] = useState<{
-    matched_count: number;
-    unmatched_count: number;
-    total_source_lines: number;
-    unmatched_articles: string[];
-  } | null>(null);
+  const [lastRebuild, setLastRebuild] = useState<any | null>(null);
 
   const rebuild = useMutation({
     mutationFn: async () => {
@@ -95,20 +102,16 @@ export function AanvullingTab({
       return data as any;
     },
     onSuccess: (result: any) => {
-      setLastRebuild({
-        matched_count: result?.matched_count ?? 0,
-        unmatched_count: result?.unmatched_count ?? 0,
-        total_source_lines: result?.total_source_lines ?? 0,
-        unmatched_articles: Array.isArray(result?.unmatched_articles)
-          ? result.unmatched_articles
-          : [],
-      });
-      qc.invalidateQueries({ queryKey: ["aanvulling", caseId] });
-      qc.invalidateQueries({ queryKey: ["aanvulling-unmatched", caseId] });
+      setLastRebuild(result);
+      qc.invalidateQueries({ queryKey: ["aanvulling-matched", caseId] });
+      qc.invalidateQueries({ queryKey: ["aanvulling-unmatched-rpc", caseId] });
+      qc.invalidateQueries({ queryKey: ["case", caseId] });
       toast.success(
-        `Aanvulling opnieuw opgebouwd: ${result?.matched_count ?? 0} gematcht, ${
+        `Aanvulling opnieuw opgebouwd: ${result?.matched_count ?? 0} gematcht · ${
           result?.unmatched_count ?? 0
-        } niet gematcht`,
+        } niet gevonden · ${result?.inactive_count ?? 0} inactief · ${
+          result?.missing_article_number_count ?? 0
+        } zonder artikelnr`,
       );
     },
     onError: (e: any) => {
@@ -116,249 +119,398 @@ export function AanvullingTab({
     },
   });
 
-  const updateRow = useMutation({
-    mutationFn: async (patch: any) => {
-      const { id, ...rest } = patch;
-      const { error } = await supabase
-        .from("case_order_lines")
-        .update(rest)
-        .eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["aanvulling", caseId] }),
-  });
-
-  const remove = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from("case_order_lines")
-        .delete()
-        .eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["aanvulling", caseId] }),
-  });
-
   const totalQty = useMemo(
     () =>
-      rows.reduce((s: number, r: any) => s + (Number(r.customer_quantity) || 0), 0),
+      rows.reduce(
+        (s: number, r: any) => s + (Number(r.customer_quantity) || 0),
+        0,
+      ),
     [rows],
   );
 
+  const lastRebuildAt = caseRow?.last_aanvulling_rebuild_at as string | null;
+  const lastMaterialChange = caseRow?.last_material_change_at as string | null;
+  const isStale =
+    !!lastRebuildAt &&
+    !!lastMaterialChange &&
+    new Date(lastMaterialChange) > new Date(lastRebuildAt);
+  const neverBuilt = !lastRebuildAt;
+
+  const hasIssues =
+    notFound.length > 0 || inactive.length > 0 || missingArt.length > 0;
+
   return (
-    <div className="space-y-4">
-      {lianderInfo && lianderInfo.active_count === 0 && (
-        <Card className="border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="mt-0.5 h-4 w-4" />
-            <div>
-              Er is nog geen Liander Assortimentslijst geïmporteerd. Importeer eerst
-              een actuele lijst voordat je Aanvulling kunt opbouwen.
+    <TooltipProvider>
+      <div className="space-y-4">
+        {lianderInfo && lianderInfo.active_count === 0 && (
+          <Card className="border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4" />
+              <div>
+                Er is nog geen Liander Assortimentslijst geïmporteerd. Importeer
+                eerst een actuele lijst voordat je Aanvulling kunt opbouwen.
+              </div>
             </div>
+          </Card>
+        )}
+
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
+          <MiniStat
+            label="Laatste Liander-import"
+            value={
+              lianderInfo?.last_import_date
+                ? new Date(lianderInfo.last_import_date).toLocaleDateString(
+                    "nl-NL",
+                  )
+                : "—"
+            }
+            hint={lianderInfo?.last_file ?? undefined}
+          />
+          <MiniStat
+            label="Actieve Liander-artikelen"
+            value={lianderInfo?.active_count ?? 0}
+          />
+          <MiniStat label="Bestelregels" value={rows.length} />
+          <MiniStat
+            label="Niet gevonden"
+            value={notFound.length}
+            tone={notFound.length > 0 ? "amber" : undefined}
+          />
+          <MiniStat
+            label="Inactief in Liander"
+            value={inactive.length}
+            tone={inactive.length > 0 ? "amber" : undefined}
+          />
+          <MiniStat
+            label="Zonder artikelnr"
+            value={missingArt.length}
+            tone={missingArt.length > 0 ? "red" : undefined}
+          />
+          <MiniStat
+            label="Laatste rebuild"
+            value={
+              lastRebuildAt
+                ? new Date(lastRebuildAt).toLocaleString("nl-NL")
+                : "—"
+            }
+          />
+        </div>
+
+        {(isStale || neverBuilt) && (
+          <Card
+            className={`p-3 text-sm ${
+              isStale
+                ? "border-amber-200 bg-amber-50 text-amber-900"
+                : "border-sky-200 bg-sky-50 text-sky-900"
+            }`}
+          >
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4" />
+              <div>
+                {isStale
+                  ? "Aanvulling mogelijk verouderd — Materiaalstaat is gewijzigd na de laatste rebuild. Bouw opnieuw op."
+                  : "Aanvulling is nog niet opgebouwd voor deze case. Klik op 'Aanvulling opnieuw opbouwen'."}
+              </div>
+            </div>
+          </Card>
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-slate-500">
+            Bestelvoorbereiding richting Liander. Alleen artikelen uit de actieve
+            Liander Assortimentslijst worden als bestelregel opgeslagen.
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowOnlyIssues((v) => !v)}
+            >
+              {showOnlyIssues ? "Toon alles" : "Toon alleen problemen"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                matchedQuery.refetch();
+                unmatchedQuery.refetch();
+              }}
+            >
+              <RefreshCw className="h-4 w-4" /> Refresh
+            </Button>
+            <Button
+              onClick={() => rebuild.mutate()}
+              disabled={rebuild.isPending}
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${rebuild.isPending ? "animate-spin" : ""}`}
+              />{" "}
+              Aanvulling opnieuw opbouwen
+            </Button>
           </div>
-        </Card>
-      )}
+        </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <MiniStat
-          label="Actieve Liander-lijst (laatste import)"
-          value={
-            lianderInfo?.last_import_date
-              ? new Date(lianderInfo.last_import_date).toLocaleDateString("nl-NL")
-              : "—"
-          }
+        {lastRebuild && (
+          <Card className="border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
+            Laatste rebuild: {lastRebuild.matched_count} gematcht ·{" "}
+            {lastRebuild.unmatched_count} niet gevonden ·{" "}
+            {lastRebuild.inactive_count} inactief ·{" "}
+            {lastRebuild.missing_article_number_count} zonder artikelnr · uit{" "}
+            {lastRebuild.total_source_lines} bronregel(s) /{" "}
+            {lastRebuild.total_source_articles} uniek artikel(en)
+          </Card>
+        )}
+
+        {hasIssues && (
+          <Card className="border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+            <div className="font-medium">Controle vóór bestellen</div>
+            <ul className="mt-1 list-inside list-disc">
+              {missingArt.length > 0 && (
+                <li>{missingArt.length} regel(s) zonder artikelnummer</li>
+              )}
+              {notFound.length > 0 && (
+                <li>
+                  {notFound.length} artikel(en) niet gevonden in actieve
+                  Liander-lijst
+                </li>
+              )}
+              {inactive.length > 0 && (
+                <li>
+                  {inactive.length} artikel(en) inactief in huidige Liander-lijst
+                </li>
+              )}
+            </ul>
+          </Card>
+        )}
+
+        {!showOnlyIssues && (
+          <Card className="overflow-hidden p-0">
+            <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-2 text-xs text-slate-500">
+              <span>
+                {rows.length} bestelregels · Totaal Klant Hoeveelheid:{" "}
+                <span className="font-medium tabular-nums">{totalQty}</span>
+              </span>
+              <span className="text-slate-400">
+                Case {caseRow?.case_number ?? "—"} · Project{" "}
+                {caseRow?.project_number ?? "—"}
+              </span>
+            </div>
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-4 py-2">Artikelnr</th>
+                  <th className="px-4 py-2">Omschrijving (Liander)</th>
+                  <th className="px-4 py-2">Eenheid</th>
+                  <th className="px-4 py-2 w-36 text-right">
+                    <span className="inline-flex items-center gap-1">
+                      Klant Hoeveelheid
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-3 w-3 text-slate-400" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          Klant Hoeveelheid wordt berekend uit de Materiaalstaat
+                          (som van totalen per artikelnummer), niet uit de
+                          Liander-masterlijst.
+                        </TooltipContent>
+                      </Tooltip>
+                    </span>
+                  </th>
+                  <th className="px-4 py-2 text-right">Bron (Materiaalstaat)</th>
+                  <th className="px-4 py-2 text-right">Bronregels</th>
+                  <th className="px-4 py-2">Match</th>
+                  <th className="px-4 py-2">Laatste Liander-import</th>
+                  <th className="px-4 py-2">Opmerking</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={9}
+                      className="px-4 py-10 text-center text-slate-400"
+                    >
+                      Geen bestelregels — klik op "Aanvulling opnieuw opbouwen".
+                    </td>
+                  </tr>
+                )}
+                {rows.map((r: any) => (
+                  <tr key={r.case_order_line_id} className="border-t">
+                    <td className="px-4 py-2 font-mono text-xs">
+                      {r.article_number}
+                    </td>
+                    <td className="px-4 py-2">
+                      {r.liander_description ?? r.description}
+                    </td>
+                    <td className="px-4 py-2 text-slate-500">
+                      {r.liander_unit ?? r.unit}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums font-medium">
+                      {Number(r.customer_quantity)}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums text-slate-500">
+                      {Number(r.source_total_quantity)}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums text-slate-500">
+                      {r.source_material_line_count}
+                    </td>
+                    <td className="px-4 py-2">
+                      {r.liander_active === false ? (
+                        <Badge
+                          variant="secondary"
+                          className="bg-amber-100 text-amber-800"
+                        >
+                          Inactief
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="secondary"
+                          className="bg-emerald-100 text-emerald-700"
+                        >
+                          Actief
+                        </Badge>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-slate-500">
+                      {r.last_liander_import_date
+                        ? new Date(
+                            r.last_liander_import_date,
+                          ).toLocaleDateString("nl-NL")
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-slate-500">
+                      {r.note ?? ""}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        )}
+
+        <UnmatchedBlock
+          title="Niet gevonden in actieve Liander Assortimentslijst"
+          tone="amber"
+          rows={notFound}
+          showArticle
         />
-        <MiniStat label="Actieve Liander-artikelen" value={lianderInfo?.active_count ?? 0} />
-        <MiniStat label="Gematchte bestelregels" value={rows.length} />
-        <MiniStat label="Niet-gematchte materiaalregels" value={unmatched.length} />
+        <UnmatchedBlock
+          title="Liander-artikel inactief"
+          tone="amber"
+          rows={inactive}
+          showArticle
+        />
+        <UnmatchedBlock
+          title="Ontbrekend artikelnummer"
+          tone="red"
+          rows={missingArt}
+          showArticle={false}
+        />
       </div>
-
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-500">
-          Bestelvoorbereiding richting Liander. Alleen artikelen die voorkomen in
-          de actieve Liander Assortimentslijst worden hier opgenomen.
-        </p>
-        <Button
-          variant="outline"
-          onClick={() => rebuild.mutate()}
-          disabled={rebuild.isPending}
-        >
-          <RefreshCw
-            className={`h-4 w-4 ${rebuild.isPending ? "animate-spin" : ""}`}
-          />{" "}
-          Aanvulling opnieuw opbouwen
-        </Button>
-      </div>
-
-      {lastRebuild && (
-        <Card className="border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
-          Laatste rebuild: {lastRebuild.matched_count} gematchte bestelregel(s)
-          uit {lastRebuild.total_source_lines} materiaalregel(s) ·{" "}
-          {lastRebuild.unmatched_count} niet gematcht
-          {lastRebuild.unmatched_articles.length > 0 && (
-            <span className="ml-1 font-mono text-sky-800">
-              ({lastRebuild.unmatched_articles.slice(0, 8).join(", ")}
-              {lastRebuild.unmatched_articles.length > 8 ? " …" : ""})
-            </span>
-          )}
-        </Card>
-      )}
-
-      <Card className="overflow-hidden p-0">
-        <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-2 text-xs text-slate-500">
-          <span>
-            {rows.length} aanvullingsregels · Totaal hoeveelheid:{" "}
-            <span className="font-medium tabular-nums">{totalQty}</span>
-          </span>
-        </div>
-        <table className="w-full text-sm">
-          <thead className="text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-2">Artikelnr</th>
-              <th className="px-4 py-2">Omschrijving</th>
-              <th className="px-4 py-2">Eenheid</th>
-              <th className="px-4 py-2 w-32 text-right">Klant Hoeveelheid</th>
-              <th className="px-4 py-2">Match Liander</th>
-              <th className="px-4 py-2">Case</th>
-              <th className="px-4 py-2">Project</th>
-              <th className="px-4 py-2">Opmerking</th>
-              <th className="px-4 py-2 w-12"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={9} className="px-4 py-10 text-center text-slate-400">
-                  Geen aanvullingsregels — klik op "Opnieuw opbouwen".
-                </td>
-              </tr>
-            )}
-            {rows.map((r: any) => (
-              <tr key={r.id} className="border-t">
-                <td className="px-4 py-2 font-mono text-xs">{r.article_number}</td>
-                <td className="px-4 py-2">{r.description}</td>
-                <td className="px-4 py-2 text-slate-500">{r.unit}</td>
-                <td className="px-4 py-2">
-                  <QtyCell
-                    value={r.customer_quantity}
-                    onChange={(v) =>
-                      updateRow.mutate({ id: r.id, customer_quantity: v })
-                    }
-                  />
-                </td>
-                <td className="px-4 py-2">
-                  <Badge
-                    variant="secondary"
-                    className="bg-emerald-100 text-emerald-700"
-                  >
-                    Ja
-                  </Badge>
-                </td>
-                <td className="px-4 py-2">{caseRow.case_number}</td>
-                <td className="px-4 py-2">{caseRow.project_number}</td>
-                <td className="px-4 py-2">
-                  <Input
-                    defaultValue={r.note ?? ""}
-                    className="h-8"
-                    onBlur={(e) =>
-                      e.target.value !== (r.note ?? "") &&
-                      updateRow.mutate({ id: r.id, note: e.target.value })
-                    }
-                  />
-                </td>
-                <td className="px-4 py-2 text-right">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => remove.mutate(r.id)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
-
-      <Card className="overflow-hidden p-0">
-        <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-sm text-amber-800">
-          <AlertTriangle className="h-4 w-4" />
-          <span className="font-medium">
-            Niet gevonden in actieve Liander Assortimentslijst
-          </span>
-          <span className="text-xs text-amber-700">
-            ({unmatched.length} artikel{unmatched.length === 1 ? "" : "en"})
-          </span>
-        </div>
-        <table className="w-full text-sm">
-          <thead className="text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-2">Artikelnr</th>
-              <th className="px-4 py-2">Omschrijving</th>
-              <th className="px-4 py-2 text-right">Hoeveelheid</th>
-              <th className="px-4 py-2">Eenheid</th>
-              <th className="px-4 py-2">Reden</th>
-            </tr>
-          </thead>
-          <tbody>
-            {unmatched.length === 0 && (
-              <tr>
-                <td
-                  colSpan={5}
-                  className="px-4 py-6 text-center text-xs text-slate-400"
-                >
-                  Geen ongematchte artikelen.
-                </td>
-              </tr>
-            )}
-            {unmatched.map((m: any) => (
-              <tr key={m.article_number} className="border-t">
-                <td className="px-4 py-2 font-mono text-xs">{m.article_number}</td>
-                <td className="px-4 py-2">{m.description}</td>
-                <td className="px-4 py-2 text-right tabular-nums">
-                  {Number(m.total_quantity)}
-                </td>
-                <td className="px-4 py-2 text-slate-500">{m.unit}</td>
-                <td className="px-4 py-2 text-amber-700">
-                  Niet gevonden in actieve Liander Assortimentslijst
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
-    </div>
+    </TooltipProvider>
   );
 }
 
-function QtyCell({
-  value,
-  onChange,
+function UnmatchedBlock({
+  title,
+  tone,
+  rows,
+  showArticle,
 }: {
-  value: number;
-  onChange: (v: number) => void;
+  title: string;
+  tone: "amber" | "red";
+  rows: any[];
+  showArticle: boolean;
 }) {
-  const [v, setV] = useState(String(value ?? 0));
+  if (rows.length === 0) return null;
+  const headClass =
+    tone === "red"
+      ? "bg-red-50 text-red-800"
+      : "bg-amber-50 text-amber-800";
   return (
-    <Input
-      type="number"
-      value={v}
-      onChange={(e) => setV(e.target.value)}
-      onBlur={() => {
-        const n = Number(v);
-        if (!Number.isNaN(n) && n !== Number(value)) onChange(n);
-      }}
-      className="h-8 text-right tabular-nums"
-    />
+    <Card className="overflow-hidden p-0">
+      <div
+        className={`flex items-center gap-2 border-b px-4 py-2 text-sm ${headClass}`}
+      >
+        <AlertTriangle className="h-4 w-4" />
+        <span className="font-medium">{title}</span>
+        <span className="text-xs opacity-80">({rows.length})</span>
+      </div>
+      <table className="w-full text-sm">
+        <thead className="text-left text-xs uppercase text-slate-500">
+          <tr>
+            {showArticle && <th className="px-4 py-2">Artikelnr</th>}
+            <th className="px-4 py-2">Omschrijving</th>
+            <th className="px-4 py-2 text-right">Hoeveelheid</th>
+            <th className="px-4 py-2">Eenheid</th>
+            <th className="px-4 py-2">Categorie</th>
+            <th className="px-4 py-2 text-right">Bronregels</th>
+            <th className="px-4 py-2">Reden</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((m: any, i: number) => (
+            <tr key={`${m.article_number ?? "noart"}-${i}`} className="border-t">
+              {showArticle && (
+                <td className="px-4 py-2 font-mono text-xs">
+                  {m.article_number ?? "—"}
+                </td>
+              )}
+              <td className="px-4 py-2">{m.description ?? "—"}</td>
+              <td className="px-4 py-2 text-right tabular-nums">
+                {Number(m.source_total_quantity)}
+              </td>
+              <td className="px-4 py-2 text-slate-500">{m.unit ?? ""}</td>
+              <td className="px-4 py-2 text-slate-500">
+                {m.category_name ?? "—"}
+              </td>
+              <td className="px-4 py-2 text-right tabular-nums text-slate-500">
+                {m.source_material_line_count}
+              </td>
+              <td
+                className={`px-4 py-2 ${
+                  tone === "red" ? "text-red-700" : "text-amber-700"
+                }`}
+              >
+                {m.reason}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
   );
 }
 
-function MiniStat({ label, value }: { label: string; value: any }) {
+function MiniStat({
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  label: string;
+  value: any;
+  hint?: string;
+  tone?: "amber" | "red";
+}) {
+  const valueClass =
+    tone === "red"
+      ? "text-red-700"
+      : tone === "amber"
+        ? "text-amber-700"
+        : "";
   return (
     <Card className="p-3">
       <div className="text-xs text-slate-500">{label}</div>
-      <div className="mt-1 text-base font-semibold tabular-nums">{value}</div>
+      <div
+        className={`mt-1 text-base font-semibold tabular-nums ${valueClass}`}
+      >
+        {value}
+      </div>
+      {hint && (
+        <div className="mt-0.5 truncate text-[10px] text-slate-400" title={hint}>
+          {hint}
+        </div>
+      )}
     </Card>
   );
 }
