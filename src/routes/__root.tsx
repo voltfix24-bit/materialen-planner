@@ -57,8 +57,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Werkvoorbereiding" },
-      { name: "description", content: "Interne werkvoorbereidings-app" },
+      { title: "TerreVolt BV — Werkvoorbereiding" },
+      { name: "description", content: "TerreVolt BV interne werkvoorbereidings-app" },
     ],
     links: [{ rel: "stylesheet", href: appCss }],
   }),
