@@ -16,6 +16,15 @@ import { toast } from "sonner";
 import { Upload, FileSpreadsheet, Trash2, Eye, Power } from "lucide-react";
 import { parseTemplateFile, type TemplateParseResult } from "@/lib/template-parser";
 
+function sourceTypeLabel(s: string | null | undefined): string {
+  if (!s) return "—";
+  if (s === "vdh") return "TerreVolt";
+  if (s === "liander") return "Liander";
+  if (s === "internal_code") return "Intern";
+  if (s === "section_header") return "Sectie";
+  return s;
+}
+
 export const Route = createFileRoute("/templates")({
   component: TemplatesPage,
 });
@@ -99,7 +108,7 @@ function TemplatesPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Materiaalstaat templates</h1>
           <p className="text-sm text-slate-500">
-            Vaste Van den Heuvel template-opbouw (categorieën, regels, formules als metadata).
+            Vaste TerreVolt template-opbouw (categorieën, regels, formules als metadata).
           </p>
         </div>
         <Button onClick={() => setImportOpen(true)}>
@@ -307,7 +316,7 @@ function ImportTemplateDialog({
           <div className="grid grid-cols-2 gap-3">
             <label className="text-sm">
               <span className="mb-1 block text-xs font-medium text-slate-600">Naam</span>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Van den Heuvel Materiaalstaat" />
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="TerreVolt Materiaalstaat" />
             </label>
             <label className="text-sm">
               <span className="mb-1 block text-xs font-medium text-slate-600">Versie</span>
@@ -367,7 +376,7 @@ function ImportTemplateDialog({
                         <TableCell className="text-xs">{l.unit ?? ""}</TableCell>
                         <TableCell className="text-xs">{l.excel_category_id ?? ""}</TableCell>
                         <TableCell className="text-xs">
-                          <Badge variant="secondary">{l.source_type}</Badge>
+                          <Badge variant="secondary">{sourceTypeLabel(l.source_type)}</Badge>
                         </TableCell>
                         <TableCell className="text-xs">{l.is_formula_quantity ? "ja" : ""}</TableCell>
                       </TableRow>
@@ -492,7 +501,7 @@ function TemplatePreviewDialog({ templateId, onClose }: { templateId: string; on
                     )}
                   </TableCell>
                   <TableCell className="text-xs">
-                    <Badge variant="secondary">{l.source_type ?? "—"}</Badge>
+                    <Badge variant="secondary">{sourceTypeLabel(l.source_type)}</Badge>
                   </TableCell>
                   <TableCell className="text-xs" title={l.quantity_formula_text ?? l.total_formula_text ?? ""}>
                     {(l.is_formula_quantity || l.total_formula_text) ? "ja" : ""}

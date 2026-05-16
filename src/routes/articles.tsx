@@ -28,7 +28,7 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/articles")({ component: ArticlesPage });
 
-const SOURCES = ["VDH", "Liander", "Handmatig", "Anders"];
+const SOURCES = ["TerreVolt", "Liander", "Handmatig", "Anders"];
 
 function ArticlesPage() {
   const [q, setQ] = useState("");
