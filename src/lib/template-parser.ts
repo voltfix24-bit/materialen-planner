@@ -76,7 +76,9 @@ function toNumOrNull(v: any): number | null {
 function detectSourceType(article: string | null): TemplateLine["source_type"] {
   if (!article) return "section_header";
   const a = article.trim();
-  if (/^vdh/i.test(a)) return "vdh";
+  // Interne TerreVolt-template artikelnummers (legacy prefix in bronbestanden).
+  // Het artikelnummer zelf blijft ongewijzigd; alleen de classificatie wordt geneutraliseerd.
+  if (/^vdh/i.test(a)) return "terrevolt";
   if (/^(comp|compr)/i.test(a)) return "internal_code";
   if (/^\d{6,}$/.test(a) && (a.startsWith("200") || a.startsWith("260"))) return "liander";
   return "unknown";
