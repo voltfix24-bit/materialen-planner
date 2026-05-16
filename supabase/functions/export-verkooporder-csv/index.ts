@@ -128,7 +128,15 @@ Deno.serve(async (req) => {
       String(caseRow.case_number ?? case_id),
     );
 
-    // 2. Server-side rebuild vanuit Aanvulling (case_order_lines)
+    // 2a. Server-side rebuild van Aanvulling (case_order_lines) zodat
+    //     ontbrekende/verouderde Aanvulling geen blocker meer is.
+    const { error: aanvErr } = await supabase.rpc(
+      "rebuild_case_order_lines",
+      { p_case_id: case_id },
+    );
+    if (aanvErr) throw aanvErr;
+
+    // 2b. Server-side rebuild van Verkooporder vanuit Aanvulling
     const { data: rebuildResult, error: rebuildErr } = await supabase.rpc(
       "rebuild_verkooporder_lines",
       { p_case_id: case_id },
