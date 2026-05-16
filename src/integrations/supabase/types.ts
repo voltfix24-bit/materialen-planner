@@ -887,6 +887,26 @@ export type Database = {
           warnings: Json
         }[]
       }
+      get_case_verkooporder_lines: {
+        Args: { p_case_id: string }
+        Returns: {
+          case_status: string
+          created_at: string
+          export_stale: boolean
+          last_aanvulling_rebuild_at: string
+          last_exported_at: string
+          last_material_change_at: string
+          last_verkooporder_rebuild_at: string
+          so_customernumber: string
+          so_number: string
+          so_project: string
+          sol_articlenumber: string
+          sol_quantity: number
+          source_case_order_line_count: number
+          updated_at: string
+          verkooporder_line_id: string
+        }[]
+      }
       lookup_material_articles: {
         Args: { p_article_numbers: string[] }
         Returns: {
@@ -938,6 +958,7 @@ export type Database = {
         Returns: Json
       }
       rebuild_case_order_lines: { Args: { p_case_id: string }; Returns: Json }
+      rebuild_verkooporder_lines: { Args: { p_case_id: string }; Returns: Json }
       reorder_case_material_line: {
         Args: { p_case_id: string; p_direction: string; p_line_id: string }
         Returns: Json
