@@ -376,7 +376,7 @@ function ImportTemplateDialog({
                         <TableCell className="text-xs">{l.unit ?? ""}</TableCell>
                         <TableCell className="text-xs">{l.excel_category_id ?? ""}</TableCell>
                         <TableCell className="text-xs">
-                          <Badge variant="secondary">{l.source_type}</Badge>
+                          <Badge variant="secondary">{sourceTypeLabel(l.source_type)}</Badge>
                         </TableCell>
                         <TableCell className="text-xs">{l.is_formula_quantity ? "ja" : ""}</TableCell>
                       </TableRow>
