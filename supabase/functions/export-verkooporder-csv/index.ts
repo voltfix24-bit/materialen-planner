@@ -12,7 +12,9 @@ const corsHeaders = {
 };
 
 // CSV-formaat config — één centrale plek.
-// Wijzig hier om het CSV-formaat te tunen op het originele Excel-bestand.
+// Frontend mirror staat in src/lib/csv-config.ts.
+// Bij wijziging hier MOET CSV_CONFIG_VERSION in beide bestanden meeverhoogd worden.
+const CSV_CONFIG_VERSION = "verkooporder_csv_v1";
 const CSV_CONFIG = {
   separator: ",",
   include_header: true,
@@ -30,6 +32,9 @@ const CSV_HEADERS = [
   "so_customernumber",
   "so_project",
 ];
+
+const CSV_HEADER_LINE = CSV_HEADERS.join(CSV_CONFIG.separator);
+const CSV_CONFIG_SNAPSHOT = { ...CSV_CONFIG, version: CSV_CONFIG_VERSION, headers: CSV_HEADERS };
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
