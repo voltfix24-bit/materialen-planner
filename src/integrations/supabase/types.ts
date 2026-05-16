@@ -823,6 +823,7 @@ export type Database = {
           unit: string
         }[]
       }
+      get_case_export_readiness: { Args: { p_case_id: string }; Returns: Json }
       get_case_material_lines_with_status: {
         Args: { p_case_id: string }
         Returns: {
