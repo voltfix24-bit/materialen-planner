@@ -501,7 +501,7 @@ function TemplatePreviewDialog({ templateId, onClose }: { templateId: string; on
                     )}
                   </TableCell>
                   <TableCell className="text-xs">
-                    <Badge variant="secondary">{l.source_type ?? "—"}</Badge>
+                    <Badge variant="secondary">{sourceTypeLabel(l.source_type)}</Badge>
                   </TableCell>
                   <TableCell className="text-xs" title={l.quantity_formula_text ?? l.total_formula_text ?? ""}>
                     {(l.is_formula_quantity || l.total_formula_text) ? "ja" : ""}
