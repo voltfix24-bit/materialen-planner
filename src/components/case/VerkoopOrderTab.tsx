@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 import {
   CSV_CONFIG,
+  CSV_CONFIG_VERSION,
   CSV_HEADERS,
   buildCsv,
   fileName,
