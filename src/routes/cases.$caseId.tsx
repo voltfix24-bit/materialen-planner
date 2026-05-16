@@ -194,6 +194,7 @@ function CaseDetail() {
           <TabsTrigger value="aanvulling">Aanvulling</TabsTrigger>
           <TabsTrigger value="verkoop">Verkooporder</TabsTrigger>
           <TabsTrigger value="logs">Exportlog</TabsTrigger>
+          <TabsTrigger value="control">Controle</TabsTrigger>
         </TabsList>
         <TabsContent value="overview" className="mt-4">
           <OverviewTab caseRow={caseRow} />
