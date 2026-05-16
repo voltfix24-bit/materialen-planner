@@ -11,13 +11,16 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// CSV-formaat config — één centrale plek
+// CSV-formaat config — één centrale plek.
+// Wijzig hier om het CSV-formaat te tunen op het originele Excel-bestand.
 const CSV_CONFIG = {
   separator: ",",
   include_header: true,
-  encoding: "utf-8",
-  decimal: ".",
-  line_ending: "\n",
+  encoding: "UTF-8",
+  decimal_separator: ".",
+  line_ending: "\r\n",
+  quote_values: false,
+  file_name_pattern: "Case {case_number}.csv",
 };
 
 const CSV_HEADERS = [
