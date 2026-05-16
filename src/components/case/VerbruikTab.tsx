@@ -98,7 +98,7 @@ export function VerbruikTab({ caseId, caseRow }: { caseId: string; caseRow: any 
         p_case_id: caseId,
       });
       if (error) throw error;
-      return (data ?? []) as VerbruikRow[];
+      return (data ?? []) as unknown as VerbruikRow[];
     },
   });
 
