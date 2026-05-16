@@ -128,6 +128,14 @@ export function VerkoopOrderTab({
     onError: (e: any) => toast.error("Rebuild mislukt: " + (e?.message ?? e)),
   });
 
+  const [lastExportMeta, setLastExportMeta] = useState<{
+    csv_config_version?: string;
+    csv_header?: string;
+    csv_config?: any;
+    file_name?: string;
+    row_count?: number;
+  } | null>(null);
+
   const exportCsv = useMutation({
     mutationFn: async () => {
       const { data, error } = await supabase.functions.invoke(
@@ -146,6 +154,21 @@ export function VerkoopOrderTab({
       a.download = data.file_name ?? fileName(caseRow?.case_number);
       a.click();
       URL.revokeObjectURL(url);
+      setLastExportMeta({
+        csv_config_version: data.csv_config_version,
+        csv_header: data.csv_header,
+        csv_config: data.csv_config,
+        file_name: data.file_name,
+        row_count: data.row_count,
+      });
+      if (
+        data.csv_config_version &&
+        data.csv_config_version !== CSV_CONFIG_VERSION
+      ) {
+        toast.warning(
+          `CSV-config versie verschilt: preview ${CSV_CONFIG_VERSION} vs export ${data.csv_config_version}`,
+        );
+      }
       toast.success(`CSV gedownload (${data.row_count} regels)`);
       qc.invalidateQueries({ queryKey: ["verkooporder-rpc", caseId] });
       qc.invalidateQueries({ queryKey: ["case", caseId] });
