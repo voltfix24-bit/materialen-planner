@@ -120,14 +120,14 @@ function Dashboard() {
             {filtered.map((c: any) => {
               const s = STATUS[(c.status as CaseStatus) ?? "concept"];
               const lineCount = c.case_material_lines?.[0]?.count ?? 0;
-              const lastExport =
-                c.export_logs?.length > 0
-                  ? new Date(
-                      c.export_logs.sort((a: any, b: any) =>
-                        b.exported_at.localeCompare(a.exported_at),
-                      )[0].exported_at,
-                    ).toLocaleString("nl-NL")
-                  : "—";
+              const sortedLogs = (c.export_logs ?? []).slice().sort(
+                (a: any, b: any) => b.exported_at.localeCompare(a.exported_at),
+              );
+              const lastExportTs = c.last_exported_at ?? sortedLogs[0]?.exported_at ?? null;
+              const lastExport = lastExportTs
+                ? new Date(lastExportTs).toLocaleString("nl-NL")
+                : "—";
+              const lastStatus = sortedLogs[0]?.status ?? null;
               return (
                 <tr
                   key={c.id}
@@ -151,6 +151,30 @@ function Dashboard() {
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">{lineCount}</td>
                   <td className="px-4 py-3 text-slate-500">{lastExport}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {!lastExportTs && (
+                        <Badge variant="secondary" className="bg-slate-100 text-slate-600">
+                          Nog niet
+                        </Badge>
+                      )}
+                      {lastExportTs && lastStatus === "success" && !c.export_stale && (
+                        <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">
+                          Actueel
+                        </Badge>
+                      )}
+                      {c.export_stale && (
+                        <Badge variant="secondary" className="bg-amber-100 text-amber-800">
+                          Stale
+                        </Badge>
+                      )}
+                      {lastStatus === "failed" && (
+                        <Badge variant="secondary" className="bg-red-100 text-red-700">
+                          Laatste mislukt
+                        </Badge>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               );
             })}
