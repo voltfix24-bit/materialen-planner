@@ -137,24 +137,25 @@ Deno.serve(async (req) => {
 
     const result = rebuildResult as any;
     if (!result?.success) {
-      const code = result?.error ?? "unknown";
-      const msgMap: Record<string, string> = {
+      const code = result?.error_code ?? result?.error ?? "unknown";
+      const blockingItems = result?.blocking_items ?? [];
+      const firstBlockMsg =
+        Array.isArray(blockingItems) && blockingItems.length > 0
+          ? blockingItems[0]?.message
+          : null;
+      const fallback: Record<string, string> = {
         case_not_found: "Case niet gevonden.",
-        missing_verkooporder_settings: `Vul eerst de verkooporder instellingen in (${(result?.missing ?? []).join(", ")}).`,
-        no_aanvulling:
-          "Bouw eerst Aanvulling op voordat je Verkooporder exporteert.",
-        aanvulling_stale:
-          "Aanvulling is verouderd. Bouw eerst Aanvulling opnieuw op.",
-        no_exportable_lines:
-          "Geen exporteerbare regels in de Aanvulling (alle hoeveelheden 0 of artikelnummers ontbreken).",
+        export_blocked: "Export geblokkeerd door controle.",
       };
-      const msg = msgMap[code] ?? result?.message ?? `Export geblokkeerd (${code}).`;
+      const msg =
+        firstBlockMsg ?? result?.message ?? fallback[code] ?? `Export geblokkeerd (${code}).`;
       await logFailure(msg);
       return json(
         {
           error: msg,
           code,
-          missing: result?.missing,
+          blocking_items: blockingItems,
+          warning_items: result?.warning_items ?? [],
         },
         400,
       );
