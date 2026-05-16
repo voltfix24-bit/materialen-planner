@@ -214,6 +214,9 @@ function CaseDetail() {
         <TabsContent value="logs" className="mt-4">
           <ExportLogTab caseId={caseId} />
         </TabsContent>
+        <TabsContent value="control" className="mt-4">
+          <CaseControlPanel caseId={caseId} />
+        </TabsContent>
       </Tabs>
     </div>
   );
