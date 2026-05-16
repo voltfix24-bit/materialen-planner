@@ -99,7 +99,7 @@ function TemplatesPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Materiaalstaat templates</h1>
           <p className="text-sm text-slate-500">
-            Vaste Van den Heuvel template-opbouw (categorieën, regels, formules als metadata).
+            Vaste TerreVolt template-opbouw (categorieën, regels, formules als metadata).
           </p>
         </div>
         <Button onClick={() => setImportOpen(true)}>
