@@ -29,7 +29,7 @@ function Dashboard() {
       const { data, error } = await supabase
         .from("cases")
         .select(
-          "id, case_number, project_number, description, case_date, status, created_at, case_material_lines(count), export_logs(exported_at)",
+          "id, case_number, project_number, description, case_date, status, created_at, export_stale, last_exported_at, case_material_lines(count), export_logs(exported_at, status)",
         )
         .order("created_at", { ascending: false });
       if (error) throw error;
