@@ -21,6 +21,7 @@ import { VerbruikTab } from "@/components/case/VerbruikTab";
 import { AanvullingTab } from "@/components/case/AanvullingTab";
 import { VerkoopOrderTab } from "@/components/case/VerkoopOrderTab";
 import { ExportLogTab } from "@/components/case/ExportLogTab";
+import { CaseControlPanel } from "@/components/case/CaseControlPanel";
 
 export const Route = createFileRoute("/cases/$caseId")({ component: CaseDetail });
 
