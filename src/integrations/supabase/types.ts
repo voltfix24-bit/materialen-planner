@@ -815,6 +815,43 @@ export type Database = {
           used_quantity: number
         }[]
       }
+      get_case_verbruik_lines: {
+        Args: { p_case_id: string }
+        Returns: {
+          article_id: string
+          article_number: string
+          case_id: string
+          category_code: string
+          category_id: string
+          category_name: string
+          category_sort_order: number
+          charge_or_haspel_number: string
+          description: string
+          excel_row_number: number
+          formula_source_text: string
+          formula_status: string
+          has_blocking_warning: boolean
+          id: string
+          is_auto_generated: boolean
+          is_manual: boolean
+          liander_description: string
+          liander_status: string
+          liander_unit: string
+          note: string
+          quantity: number
+          requires_charge_or_haspel: boolean
+          return_quantity: number
+          sort_order: number
+          source_label: string
+          source_rule: string
+          source_template_id: string
+          template_line_id: string
+          total_quantity: number
+          unit: string
+          used_quantity: number
+          warnings: Json
+        }[]
+      }
       lookup_material_articles: {
         Args: { p_article_numbers: string[] }
         Returns: {
