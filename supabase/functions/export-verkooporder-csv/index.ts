@@ -40,6 +40,7 @@ const json = (body: unknown, status = 200) =>
 function csvEscape(v: unknown): string {
   const s = v == null ? "" : String(v);
   const sep = CSV_CONFIG.separator;
+  if (CSV_CONFIG.quote_values) return `"${s.replace(/"/g, '""')}"`;
   const needsQuote =
     s.includes(sep) || s.includes('"') || s.includes("\n") || s.includes("\r");
   return needsQuote ? `"${s.replace(/"/g, '""')}"` : s;
@@ -49,7 +50,7 @@ function formatNumber(n: number | string): string {
   const num = Number(n);
   if (!Number.isFinite(num)) return "";
   const s = String(num);
-  return CSV_CONFIG.decimal === "," ? s.replace(".", ",") : s;
+  return CSV_CONFIG.decimal_separator === "," ? s.replace(".", ",") : s;
 }
 
 function buildCsv(rows: any[]): string {
