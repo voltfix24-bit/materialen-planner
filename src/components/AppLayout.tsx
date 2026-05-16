@@ -1,6 +1,7 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
 import { Toaster } from "@/components/ui/sonner";
+import terrevoltLogo from "@/assets/terrevolt-logo.png";
 
 const nav = [
   { to: "/", label: "Dashboard" },
