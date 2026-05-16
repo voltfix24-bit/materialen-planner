@@ -11,13 +11,16 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// CSV-formaat config — één centrale plek
+// CSV-formaat config — één centrale plek.
+// Wijzig hier om het CSV-formaat te tunen op het originele Excel-bestand.
 const CSV_CONFIG = {
   separator: ",",
   include_header: true,
-  encoding: "utf-8",
-  decimal: ".",
-  line_ending: "\n",
+  encoding: "UTF-8",
+  decimal_separator: ".",
+  line_ending: "\r\n",
+  quote_values: false,
+  file_name_pattern: "Case {case_number}.csv",
 };
 
 const CSV_HEADERS = [
@@ -37,6 +40,7 @@ const json = (body: unknown, status = 200) =>
 function csvEscape(v: unknown): string {
   const s = v == null ? "" : String(v);
   const sep = CSV_CONFIG.separator;
+  if (CSV_CONFIG.quote_values) return `"${s.replace(/"/g, '""')}"`;
   const needsQuote =
     s.includes(sep) || s.includes('"') || s.includes("\n") || s.includes("\r");
   return needsQuote ? `"${s.replace(/"/g, '""')}"` : s;
@@ -46,7 +50,7 @@ function formatNumber(n: number | string): string {
   const num = Number(n);
   if (!Number.isFinite(num)) return "";
   const s = String(num);
-  return CSV_CONFIG.decimal === "," ? s.replace(".", ",") : s;
+  return CSV_CONFIG.decimal_separator === "," ? s.replace(".", ",") : s;
 }
 
 function buildCsv(rows: any[]): string {
@@ -112,7 +116,10 @@ Deno.serve(async (req) => {
       .single();
     if (caseErr) throw caseErr;
 
-    intendedFileName = `Case ${caseRow.case_number ?? case_id}.csv`;
+    intendedFileName = CSV_CONFIG.file_name_pattern.replace(
+      "{case_number}",
+      String(caseRow.case_number ?? case_id),
+    );
 
     // 2. Server-side rebuild vanuit Aanvulling (case_order_lines)
     const { data: rebuildResult, error: rebuildErr } = await supabase.rpc(

@@ -1,53 +1,30 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { RefreshCw, AlertTriangle, Download, Info } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  RefreshCw,
+  AlertTriangle,
+  Download,
+  Info,
+  Copy,
+  Upload,
+  Check,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
-
-// CSV-formaat (spiegel van edge function CSV_CONFIG)
-const CSV_PREVIEW_CONFIG = {
-  separator: ",",
-  include_header: true,
-  encoding: "utf-8",
-  decimal: ".",
-};
-
-const CSV_HEADERS = [
-  "sol_articlenumber",
-  "sol_quantity",
-  "so_number",
-  "so_customernumber",
-  "so_project",
-];
-
-function csvEscape(v: any) {
-  const s = v == null ? "" : String(v);
-  const sep = CSV_PREVIEW_CONFIG.separator;
-  return s.includes(sep) || s.includes('"') || s.includes("\n")
-    ? `"${s.replace(/"/g, '""')}"`
-    : s;
-}
-
-function previewLines(rows: any[]): string[] {
-  const out: string[] = [];
-  if (CSV_PREVIEW_CONFIG.include_header)
-    out.push(CSV_HEADERS.join(CSV_PREVIEW_CONFIG.separator));
-  for (const r of rows.slice(0, 10)) {
-    out.push(
-      [
-        csvEscape(r.sol_articlenumber),
-        String(Number(r.sol_quantity)),
-        csvEscape(r.so_number),
-        csvEscape(r.so_customernumber),
-        csvEscape(r.so_project),
-      ].join(CSV_PREVIEW_CONFIG.separator),
-    );
-  }
-  return out;
-}
+import {
+  CSV_CONFIG,
+  CSV_HEADERS,
+  buildCsv,
+  fileName,
+  parseCsv,
+  detectLineEnding,
+  detectSeparator,
+} from "@/lib/csv-config";
 
 export function VerkoopOrderTab({
   caseId,
@@ -89,7 +66,7 @@ export function VerkoopOrderTab({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("export_logs")
-        .select("status, exported_at, error_message, row_count")
+        .select("status, exported_at, error_message, row_count, file_name")
         .eq("case_id", caseId)
         .eq("export_type", "verkooporder_csv")
         .order("exported_at", { ascending: false })
@@ -126,7 +103,6 @@ export function VerkoopOrderTab({
     !!lastVerkooporder &&
     !!lastAanvulling &&
     new Date(lastVerkooporder) < new Date(lastAanvulling);
-  const verkooporderNeverBuilt = !lastVerkooporder;
 
   const rebuild = useMutation({
     mutationFn: async () => {
@@ -166,14 +142,13 @@ export function VerkoopOrderTab({
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = data.file_name ?? `Case ${caseId}.csv`;
+      a.download = data.file_name ?? fileName(caseRow?.case_number);
       a.click();
       URL.revokeObjectURL(url);
       toast.success(`CSV gedownload (${data.row_count} regels)`);
       qc.invalidateQueries({ queryKey: ["verkooporder-rpc", caseId] });
       qc.invalidateQueries({ queryKey: ["case", caseId] });
       qc.invalidateQueries({ queryKey: ["last-export", caseId] });
-      qc.invalidateQueries({ queryKey: ["export-logs", caseId] });
     },
     onError: (e: any) => toast.error("Export mislukt: " + (e?.message ?? e)),
   });
@@ -183,12 +158,163 @@ export function VerkoopOrderTab({
     [rows],
   );
 
-  const preview = useMemo(() => previewLines(rows), [rows]);
+  // === Volledige CSV mirror van edge function (preview + diagnostiek + vergelijking) ===
+  const appCsv = useMemo(() => buildCsv(rows), [rows]);
+  const appFileName = fileName(caseRow?.case_number ?? caseId);
+  const previewLines = useMemo(() => {
+    // splits op de geconfigureerde line ending; toon eerste 11 regels (header + 10 data)
+    const lines = appCsv.split(CSV_CONFIG.line_ending).filter((l) => l !== "");
+    return lines.slice(0, 11);
+  }, [appCsv]);
+
+  // === Diagnostiek ===
+  const diagnostics = useMemo(() => {
+    const articleNumbers: string[] = rows.map((r: any) =>
+      String(r.sol_articlenumber ?? "").trim(),
+    );
+    const emptyArt = articleNumbers.filter((a) => a === "").length;
+    const nonPositive = rows.filter(
+      (r: any) => !(Number(r.sol_quantity) > 0),
+    ).length;
+    const counts = new Map<string, number>();
+    for (const a of articleNumbers)
+      counts.set(a, (counts.get(a) ?? 0) + 1);
+    const duplicates = [...counts.values()].some((v) => v > 1);
+    const unique = counts.size;
+    const totalSum = rows.reduce(
+      (s: number, r: any) => s + (Number(r.sol_quantity) || 0),
+      0,
+    );
+    const longest = articleNumbers.reduce(
+      (m, a) => (a.length > m ? a.length : m),
+      0,
+    );
+    const leadingZero = articleNumbers.some(
+      (a) => a.length > 1 && a.startsWith("0"),
+    );
+    const scientific = articleNumbers.some((a) => /^\d+(\.\d+)?[eE][+-]?\d+$/.test(a));
+    return {
+      orderRowCount: rows.length,
+      csvRowCount: Math.max(
+        0,
+        appCsv.split(CSV_CONFIG.line_ending).filter((l) => l !== "").length -
+          (CSV_CONFIG.include_header ? 1 : 0),
+      ),
+      emptyArt,
+      nonPositive,
+      unique,
+      duplicates,
+      totalSum,
+      longest,
+      leadingZero,
+      scientific,
+    };
+  }, [rows, appCsv]);
+
+  // === Excel reference comparison ===
+  const [refText, setRefText] = useState("");
+  const [refFileName, setRefFileName] = useState<string | null>(null);
+
+  const comparison = useMemo(() => {
+    if (!refText.trim()) return null;
+    const refSep = detectSeparator(refText);
+    const refLE = detectLineEnding(refText);
+    const parsed = parseCsv(refText, refSep);
+    const refHeaders = parsed.headers;
+    const refRows = parsed.rows;
+
+    const headerMatch =
+      refHeaders.length === CSV_HEADERS.length &&
+      refHeaders.every(
+        (h, i) => h.toLowerCase() === CSV_HEADERS[i].toLowerCase(),
+      );
+    const colCountMatch = refHeaders.length === CSV_HEADERS.length;
+
+    // Aggregeer per artikelnummer (excel)
+    const idxArt = refHeaders.findIndex(
+      (h) => h.toLowerCase() === "sol_articlenumber",
+    );
+    const idxQty = refHeaders.findIndex(
+      (h) => h.toLowerCase() === "sol_quantity",
+    );
+
+    const excelAgg = new Map<string, number>();
+    const excelOrder: string[] = [];
+    for (const r of refRows) {
+      const art =
+        idxArt >= 0 ? String(r[idxArt] ?? "").trim() : String(r[0] ?? "").trim();
+      const qtyRaw =
+        idxQty >= 0 ? String(r[idxQty] ?? "") : String(r[1] ?? "");
+      const qty = Number(qtyRaw.replace(",", "."));
+      if (!art) continue;
+      if (!excelAgg.has(art)) excelOrder.push(art);
+      excelAgg.set(art, (excelAgg.get(art) ?? 0) + (Number.isFinite(qty) ? qty : 0));
+    }
+
+    const appAgg = new Map<string, number>();
+    const appOrder: string[] = [];
+    for (const r of rows) {
+      const art = String(r.sol_articlenumber ?? "").trim();
+      const qty = Number(r.sol_quantity) || 0;
+      if (!art) continue;
+      if (!appAgg.has(art)) appOrder.push(art);
+      appAgg.set(art, (appAgg.get(art) ?? 0) + qty);
+    }
+
+    const allArticles = new Set<string>([...appAgg.keys(), ...excelAgg.keys()]);
+    const perArticle = [...allArticles].sort().map((art) => {
+      const a = appAgg.get(art);
+      const e = excelAgg.get(art);
+      let status: "equal" | "diff" | "missing_app" | "missing_excel";
+      if (a == null) status = "missing_app";
+      else if (e == null) status = "missing_excel";
+      else if (Math.abs((a ?? 0) - (e ?? 0)) < 1e-9) status = "equal";
+      else status = "diff";
+      return {
+        art,
+        app: a,
+        excel: e,
+        diff: a != null && e != null ? a - e : null,
+        status,
+      };
+    });
+
+    const onlyInApp = perArticle.filter((p) => p.status === "missing_excel");
+    const onlyInExcel = perArticle.filter((p) => p.status === "missing_app");
+    const qtyDiff = perArticle.filter((p) => p.status === "diff");
+
+    const sameOrder =
+      appOrder.length === excelOrder.length &&
+      appOrder.every((a, i) => a === excelOrder[i]);
+
+    const appTotal = [...appAgg.values()].reduce((s, v) => s + v, 0);
+    const excelTotal = [...excelAgg.values()].reduce((s, v) => s + v, 0);
+
+    return {
+      refSep,
+      refLE,
+      refHeaders,
+      refRowCount: refRows.length,
+      headerMatch,
+      colCountMatch,
+      rowCountMatch: refRows.length === rows.length,
+      separatorMatch: refSep === CSV_CONFIG.separator,
+      sameOrder,
+      perArticle,
+      onlyInApp,
+      onlyInExcel,
+      qtyDiff,
+      appTotal,
+      excelTotal,
+      totalDiff: appTotal - excelTotal,
+      appOrder,
+      excelOrder,
+    };
+  }, [refText, rows]);
 
   const fmt = (v: string | null | undefined) =>
     v ? new Date(v).toLocaleString("nl-NL") : "—";
 
-  // Status badge
   let statusLabel = "Verkooporder nog niet opgebouwd";
   let statusClass = "bg-slate-100 text-slate-700";
   if (verkooporderActueel) {
@@ -205,6 +331,21 @@ export function VerkoopOrderTab({
   const canRebuild = !settingsMissing && !aanvullingMissing && !aanvullingStale;
   const canExport =
     !settingsMissing && !aanvullingMissing && !aanvullingStale && rows.length > 0;
+
+  const copy = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label} gekopieerd`);
+    } catch {
+      toast.error("Kopiëren mislukt");
+    }
+  };
+
+  const onUpload = async (file: File) => {
+    const text = await file.text();
+    setRefText(text);
+    setRefFileName(file.name);
+  };
 
   return (
     <div className="space-y-4">
@@ -223,8 +364,7 @@ export function VerkoopOrderTab({
         <Card className="flex items-start gap-2 border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
           <AlertTriangle className="mt-0.5 h-4 w-4" />
           <div>
-            Bouw eerst Aanvulling op voordat je Verkooporder maakt. Verkooporder
-            wordt opgebouwd uit de laatst gebouwde Aanvulling.
+            Bouw eerst Aanvulling op voordat je Verkooporder maakt.
           </div>
         </Card>
       )}
@@ -232,8 +372,8 @@ export function VerkoopOrderTab({
         <Card className="flex items-start gap-2 border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
           <AlertTriangle className="mt-0.5 h-4 w-4" />
           <div>
-            Aanvulling is mogelijk verouderd — Materiaalstaat is gewijzigd na de
-            laatste Aanvulling-rebuild. Bouw eerst Aanvulling opnieuw op.
+            Aanvulling is verouderd — Materiaalstaat is gewijzigd na de laatste
+            Aanvulling-rebuild. Bouw eerst Aanvulling opnieuw op.
           </div>
         </Card>
       )}
@@ -242,8 +382,7 @@ export function VerkoopOrderTab({
           <AlertTriangle className="mt-0.5 h-4 w-4" />
           <div>
             Verkooporder is mogelijk verouderd — Aanvulling is opnieuw gebouwd na
-            de laatste Verkooporder-rebuild. Bouw Verkooporder opnieuw op of
-            exporteer (export rebuildt automatisch).
+            de laatste Verkooporder-rebuild. Export rebuildt automatisch.
           </div>
         </Card>
       )}
@@ -265,11 +404,6 @@ export function VerkoopOrderTab({
               {statusLabel}
             </Badge>
           </div>
-          {settingsMissing && (
-            <div className="mt-1 text-xs text-red-700">
-              Instellingen ontbreken
-            </div>
-          )}
         </div>
       </Card>
 
@@ -277,8 +411,7 @@ export function VerkoopOrderTab({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-slate-500">
           <Info className="mr-1 inline h-3 w-3" /> Bron: laatst opgebouwde
-          Aanvulling. CSV-export rebuildt altijd zelf vanuit de actuele
-          Aanvulling.
+          Aanvulling. Export rebuildt altijd zelf.
         </p>
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={() => rowsQuery.refetch()}>
@@ -288,11 +421,6 @@ export function VerkoopOrderTab({
             variant="outline"
             onClick={() => rebuild.mutate()}
             disabled={!canRebuild || rebuild.isPending}
-            title={
-              !canRebuild
-                ? "Vereisten ontbreken (instellingen of Aanvulling)"
-                : undefined
-            }
           >
             <RefreshCw
               className={`h-4 w-4 ${rebuild.isPending ? "animate-spin" : ""}`}
@@ -302,7 +430,6 @@ export function VerkoopOrderTab({
           <Button
             onClick={() => exportCsv.mutate()}
             disabled={!canExport || exportCsv.isPending}
-            title={!canExport ? "Vereisten ontbreken" : undefined}
           >
             <Download className="h-4 w-4" /> CSV exporteren
           </Button>
@@ -329,15 +456,13 @@ export function VerkoopOrderTab({
               <th className="px-4 py-2">so_customernumber</th>
               <th className="px-4 py-2">so_project</th>
               <th className="px-4 py-2 text-right">bronregels</th>
-              <th className="px-4 py-2">bijgewerkt</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
-                  Geen verkooporderregels — klik op "Verkooporder opnieuw
-                  opbouwen" of exporteer direct.
+                <td colSpan={6} className="px-4 py-10 text-center text-slate-400">
+                  Geen verkooporderregels.
                 </td>
               </tr>
             )}
@@ -355,50 +480,165 @@ export function VerkoopOrderTab({
                 <td className="px-4 py-2 text-right tabular-nums text-slate-500">
                   {r.source_case_order_line_count}
                 </td>
-                <td className="px-4 py-2 text-xs text-slate-500">
-                  {fmt(r.updated_at)}
-                </td>
               </tr>
             ))}
-            {rows.length > 0 && (
-              <tr className="border-t bg-slate-50 font-medium">
-                <td className="px-4 py-2 text-right">Totaal</td>
-                <td className="px-4 py-2 text-right tabular-nums">{totalQty}</td>
-                <td colSpan={5}></td>
-              </tr>
-            )}
           </tbody>
         </table>
       </Card>
 
       {/* CSV preview */}
       <Card className="p-4">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="text-sm font-medium">CSV-preview (eerste 10 regels)</div>
-          <div className="text-xs text-slate-500">
-            Bestand:{" "}
-            <span className="font-mono">
-              Case {caseRow?.case_number ?? caseId}.csv
-            </span>{" "}
-            · separator{" "}
-            <span className="font-mono">"{CSV_PREVIEW_CONFIG.separator}"</span> ·
-            decimal{" "}
-            <span className="font-mono">"{CSV_PREVIEW_CONFIG.decimal}"</span> ·{" "}
-            {CSV_PREVIEW_CONFIG.encoding} · header{" "}
-            {CSV_PREVIEW_CONFIG.include_header ? "ja" : "nee"}
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-sm font-medium">
+            CSV-preview (header + eerste 10 regels)
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => copy(previewLines.join("\n"), "Preview")}>
+              <Copy className="h-3 w-3" /> Kopieer preview
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => copy(appCsv, "Volledige CSV")}>
+              <Copy className="h-3 w-3" /> Kopieer volledige CSV
+            </Button>
           </div>
         </div>
+        <div className="mb-2 grid grid-cols-2 gap-2 text-xs text-slate-600 md:grid-cols-4">
+          <Meta k="bestand" v={appFileName} />
+          <Meta k="separator" v={JSON.stringify(CSV_CONFIG.separator)} />
+          <Meta k="header" v={CSV_CONFIG.include_header ? "ja" : "nee"} />
+          <Meta k="encoding" v={CSV_CONFIG.encoding} />
+          <Meta k="line ending" v={CSV_CONFIG.line_ending === "\r\n" ? "CRLF (\\r\\n)" : "LF (\\n)"} />
+          <Meta k="decimal" v={JSON.stringify(CSV_CONFIG.decimal_separator)} />
+          <Meta k="quote_values" v={CSV_CONFIG.quote_values ? "ja" : "nee"} />
+          <Meta k="totaal datarijen" v={String(diagnostics.csvRowCount)} />
+          <Meta k="gegenereerd" v={new Date().toLocaleString("nl-NL")} />
+        </div>
         <pre className="overflow-x-auto rounded bg-slate-950 p-3 text-xs text-slate-100">
-          {preview.length === 0
+          {previewLines.length === 0
             ? "(leeg — geen regels om te exporteren)"
-            : preview.join("\n")}
+            : previewLines.join("\n")}
         </pre>
+      </Card>
+
+      {/* Diagnostics */}
+      <Card className="p-4">
+        <div className="mb-3 text-sm font-medium">CSV-controle (diagnostiek)</div>
+        <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+          <Stat label="Verkooporderregels" value={diagnostics.orderRowCount} />
+          <Stat label="Geëxporteerde CSV-regels" value={diagnostics.csvRowCount} />
+          <Stat label="Regels met leeg artikelnr." value={diagnostics.emptyArt} />
+          <Stat label="Regels met qty ≤ 0" value={diagnostics.nonPositive} />
+          <Stat label="Unieke artikelnummers" value={diagnostics.unique} />
+          <Stat label="Dubbele artikelnummers" value={diagnostics.duplicates ? "ja" : "nee"} />
+          <Stat label="Som sol_quantity" value={diagnostics.totalSum} />
+          <Stat label="Langste artikelnr. (chars)" value={diagnostics.longest} />
+          <Stat label="Voorloopnul aanwezig" value={diagnostics.leadingZero ? "ja" : "nee"} />
+          <Stat
+            label="Wetenschappelijke notatie"
+            value={diagnostics.scientific ? "JA — verdacht" : "nee"}
+          />
+        </div>
+      </Card>
+
+      {/* Excel-vergelijking */}
+      <Card className="p-4">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-sm font-medium">Vergelijk met Excel CSV</div>
+          <div className="flex items-center gap-2">
+            <label className="inline-flex">
+              <input
+                type="file"
+                accept=".csv,text/csv,text/plain"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) onUpload(f);
+                }}
+              />
+              <Button size="sm" variant="outline" asChild>
+                <span>
+                  <Upload className="h-3 w-3" /> Upload referentie-CSV
+                </span>
+              </Button>
+            </label>
+            {refText && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setRefText("");
+                  setRefFileName(null);
+                }}
+              >
+                <X className="h-3 w-3" /> Wissen
+              </Button>
+            )}
+          </div>
+        </div>
+        <Textarea
+          value={refText}
+          onChange={(e) => setRefText(e.target.value)}
+          placeholder="…of plak hier de Excel-CSV (eerste regel = header)"
+          className="font-mono text-xs"
+          rows={6}
+        />
+        {refFileName && (
+          <div className="mt-1 text-xs text-slate-500">
+            Geladen: <span className="font-mono">{refFileName}</span>
+          </div>
+        )}
+
+        {comparison && (
+          <div className="mt-4 space-y-4">
+            <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+              <CheckRow ok={comparison.headerMatch} label="Headers gelijk" />
+              <CheckRow ok={comparison.colCountMatch} label="Kolomaantal gelijk" />
+              <CheckRow ok={comparison.rowCountMatch} label={`Aantal datarijen gelijk (${comparison.refRowCount} vs ${rows.length})`} />
+              <CheckRow ok={comparison.separatorMatch} label={`Separator gelijk (excel: ${JSON.stringify(comparison.refSep)})`} />
+              <CheckRow ok={comparison.sameOrder} label="Volgorde van regels gelijk" />
+              <CheckRow
+                ok={Math.abs(comparison.totalDiff) < 1e-9}
+                label={`Totaal qty gelijk (app ${comparison.appTotal} / excel ${comparison.excelTotal})`}
+              />
+              <div className="text-xs text-slate-500">
+                Excel line ending: {comparison.refLE === "\r\n" ? "CRLF" : comparison.refLE === "\n" ? "LF" : comparison.refLE === "\r" ? "CR" : "?"}
+              </div>
+              <div className="text-xs text-slate-500">
+                Excel headers: <span className="font-mono">{comparison.refHeaders.join(" | ")}</span>
+              </div>
+            </div>
+
+            <DiffBlock
+              title={`A. Alleen in app-export (${comparison.onlyInExcel.length})`}
+              items={comparison.onlyInExcel}
+              showExcel={false}
+            />
+            <DiffBlock
+              title={`B. Alleen in Excel-export (${comparison.onlyInApp.length})`}
+              items={comparison.onlyInApp}
+              showApp={false}
+            />
+            <DiffBlock
+              title={`C. Zelfde artikelnummer, ander aantal (${comparison.qtyDiff.length})`}
+              items={comparison.qtyDiff}
+            />
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <RawCsvBlock title="App CSV" text={appCsv} />
+              <RawCsvBlock title="Referentie / Excel CSV" text={refText} />
+            </div>
+          </div>
+        )}
+        {!comparison && (
+          <p className="mt-3 text-xs text-slate-500">
+            Upload of plak een Excel-CSV om automatisch te vergelijken.
+          </p>
+        )}
       </Card>
 
       {lastExport?.status === "failed" && (
         <Card className="border-rose-300 bg-rose-50 p-3 text-xs text-rose-800">
-          Laatste export-poging mislukt op{" "}
-          {fmt(lastExport.exported_at as any)}: {lastExport.error_message}
+          Laatste export-poging mislukt op {fmt(lastExport.exported_at as any)}:{" "}
+          {lastExport.error_message}
         </Card>
       )}
     </div>
@@ -412,6 +652,100 @@ function Stat({ label, value }: { label: string; value: any }) {
         {label}
       </div>
       <div className="mt-1 text-base font-semibold tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+function Meta({ k, v }: { k: string; v: string }) {
+  return (
+    <div>
+      <span className="text-slate-400">{k}:</span>{" "}
+      <span className="font-mono">{v}</span>
+    </div>
+  );
+}
+
+function CheckRow({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      {ok ? (
+        <Check className="h-4 w-4 text-emerald-600" />
+      ) : (
+        <X className="h-4 w-4 text-rose-600" />
+      )}
+      <span className={ok ? "text-emerald-800" : "text-rose-800"}>{label}</span>
+    </div>
+  );
+}
+
+function DiffBlock({
+  title,
+  items,
+  showApp = true,
+  showExcel = true,
+}: {
+  title: string;
+  items: Array<{ art: string; app?: number; excel?: number; diff: number | null }>;
+  showApp?: boolean;
+  showExcel?: boolean;
+}) {
+  if (items.length === 0)
+    return (
+      <div className="rounded border bg-emerald-50 p-2 text-xs text-emerald-800">
+        ✓ {title} — geen
+      </div>
+    );
+  return (
+    <div className="rounded border">
+      <div className="border-b bg-slate-50 px-3 py-1.5 text-xs font-medium">
+        {title}
+      </div>
+      <div className="max-h-64 overflow-auto">
+        <table className="w-full text-xs">
+          <thead className="text-left text-slate-500">
+            <tr>
+              <th className="px-3 py-1">Artikelnr.</th>
+              {showApp && <th className="px-3 py-1 text-right">App</th>}
+              {showExcel && <th className="px-3 py-1 text-right">Excel</th>}
+              <th className="px-3 py-1 text-right">Verschil</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((it) => (
+              <tr key={it.art} className="border-t">
+                <td className="px-3 py-1 font-mono">{it.art}</td>
+                {showApp && (
+                  <td className="px-3 py-1 text-right tabular-nums">
+                    {it.app ?? "—"}
+                  </td>
+                )}
+                {showExcel && (
+                  <td className="px-3 py-1 text-right tabular-nums">
+                    {it.excel ?? "—"}
+                  </td>
+                )}
+                <td className="px-3 py-1 text-right tabular-nums">
+                  {it.diff ?? "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function RawCsvBlock({ title, text }: { title: string; text: string }) {
+  const lines = text.split(/\r?\n/).slice(0, 20);
+  return (
+    <div className="rounded border">
+      <div className="border-b bg-slate-50 px-3 py-1.5 text-xs font-medium">
+        {title} (eerste 20 regels)
+      </div>
+      <pre className="max-h-64 overflow-auto p-2 text-[11px] leading-snug">
+        {lines.join("\n")}
+      </pre>
     </div>
   );
 }
