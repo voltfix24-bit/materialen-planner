@@ -98,6 +98,8 @@ Deno.serve(async (req) => {
         status: "failed",
         error_message: message,
         exported_by: "system",
+        csv_config: CSV_CONFIG_SNAPSHOT,
+        csv_header: CSV_HEADER_LINE,
       });
     } catch (_) {
       // swallow logging failure
