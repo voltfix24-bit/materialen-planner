@@ -370,9 +370,9 @@ export function VerkoopOrderTab({
     statusClass = "bg-amber-100 text-amber-800";
   }
 
-  const canRebuild = !settingsMissing && !aanvullingMissing && !aanvullingStale;
-  const canExport =
-    !settingsMissing && !aanvullingMissing && !aanvullingStale && rows.length > 0;
+  // Single source of truth: server-side readiness drives enable/disable + reasons
+  const canRebuild = readyForExport && !rebuild.isPending;
+  const canExport = readyForExport && rows.length > 0 && !exportCsv.isPending;
 
   const copy = async (text: string, label: string) => {
     try {
@@ -391,43 +391,49 @@ export function VerkoopOrderTab({
 
   return (
     <div className="space-y-4">
-      {/* Waarschuwingen */}
-      {settingsMissing && (
-        <Card className="flex items-start gap-2 border-red-300 bg-red-50 p-3 text-sm text-red-800">
-          <AlertTriangle className="mt-0.5 h-4 w-4" />
-          <div>
-            <strong>Vul eerst {missingFields.join(", ")} in</strong> op het tabblad
-            Overzicht. Zonder deze instellingen kan de Verkooporder niet worden
-            opgebouwd of geëxporteerd.
-          </div>
+      {/* Centrale readiness (zelfde bron als Controle-tab) */}
+      {readiness && (readinessBlocking.length > 0 || readinessWarnings.length > 0) && (
+        <Card
+          className={`p-3 text-sm ${
+            readinessBlocking.length > 0
+              ? "border-red-300 bg-red-50 text-red-800"
+              : "border-amber-300 bg-amber-50 text-amber-900"
+          }`}
+        >
+          {readinessBlocking.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 font-semibold">
+                <AlertTriangle className="h-4 w-4" />
+                Export geblokkeerd ({readinessBlocking.length})
+              </div>
+              <ul className="mt-1 list-disc pl-5">
+                {readinessBlocking.map((b, i) => (
+                  <li key={i}>
+                    <span className="font-mono text-xs opacity-70">[{b.code}]</span>{" "}
+                    {b.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {readinessWarnings.length > 0 && (
+            <div className={readinessBlocking.length > 0 ? "mt-2" : ""}>
+              <div className="text-xs font-semibold uppercase opacity-80">
+                Waarschuwingen ({readinessWarnings.length})
+              </div>
+              <ul className="mt-1 list-disc pl-5">
+                {readinessWarnings.map((w, i) => (
+                  <li key={i}>
+                    <span className="font-mono text-xs opacity-70">[{w.code}]</span>{" "}
+                    {w.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </Card>
       )}
-      {!settingsMissing && aanvullingMissing && (
-        <Card className="flex items-start gap-2 border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-          <AlertTriangle className="mt-0.5 h-4 w-4" />
-          <div>
-            Bouw eerst Aanvulling op voordat je Verkooporder maakt.
-          </div>
-        </Card>
-      )}
-      {!settingsMissing && !aanvullingMissing && aanvullingStale && (
-        <Card className="flex items-start gap-2 border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-          <AlertTriangle className="mt-0.5 h-4 w-4" />
-          <div>
-            Aanvulling is verouderd — Materiaalstaat is gewijzigd na de laatste
-            Aanvulling-rebuild. Bouw eerst Aanvulling opnieuw op.
-          </div>
-        </Card>
-      )}
-      {!settingsMissing && !aanvullingMissing && verkooporderStale && (
-        <Card className="flex items-start gap-2 border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-          <AlertTriangle className="mt-0.5 h-4 w-4" />
-          <div>
-            Verkooporder is mogelijk verouderd — Aanvulling is opnieuw gebouwd na
-            de laatste Verkooporder-rebuild. Export rebuildt automatisch.
-          </div>
-        </Card>
-      )}
+
 
       {/* Statistieken */}
       <Card className="grid grid-cols-2 gap-4 p-4 text-sm md:grid-cols-4 lg:grid-cols-7">
