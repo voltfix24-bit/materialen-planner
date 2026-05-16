@@ -1,6 +1,14 @@
 // CSV-formaat config — frontend mirror van edge function CSV_CONFIG.
 // Houd dit synchroon met supabase/functions/export-verkooporder-csv/index.ts.
-export const CSV_CONFIG = {
+export const CSV_CONFIG: {
+  separator: string;
+  include_header: boolean;
+  encoding: string;
+  decimal_separator: string;
+  line_ending: string;
+  quote_values: boolean;
+  file_name_pattern: string;
+} = {
   separator: ",",
   include_header: true,
   encoding: "UTF-8",
@@ -8,7 +16,7 @@ export const CSV_CONFIG = {
   line_ending: "\r\n",
   quote_values: false,
   file_name_pattern: "Case {case_number}.csv",
-} as const;
+};
 
 export const CSV_HEADERS = [
   "sol_articlenumber",
