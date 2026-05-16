@@ -16,8 +16,15 @@ export function AppLayout() {
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="sticky top-0 z-40 border-b bg-white">
         <div className="mx-auto flex h-14 max-w-[1400px] items-center gap-6 px-6">
-          <Link to="/" className="text-base font-semibold tracking-tight">
-            Werkvoorbereiding
+          <Link to="/" className="flex items-center gap-2.5">
+            <img
+              src={terrevoltLogo}
+              alt="TerreVolt BV"
+              className="h-7 w-auto"
+              width={1536}
+              height={1024}
+            />
+            <span className="sr-only">TerreVolt BV — Werkvoorbereiding</span>
           </Link>
           <nav className="flex items-center gap-1 text-sm">
             {nav.map((n) => {
@@ -39,7 +46,7 @@ export function AppLayout() {
               );
             })}
           </nav>
-          <div className="ml-auto text-xs text-slate-400">v1 — interne tool</div>
+          <div className="ml-auto text-xs text-slate-400">TerreVolt BV · interne werkvoorbereiding</div>
         </div>
       </header>
       <main className="mx-auto max-w-[1400px] px-6 py-8">
